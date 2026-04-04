@@ -1,0 +1,108 @@
+# fpga_gameconsole/Makefile — Global build orchestrator
+#
+# Usage:
+#   make all                                                — build all games, all platforms
+#   make run   GAME=char-snake ARCH=risc1 TARGET=verilator  — build + run in Verilator sim
+#   make run   GAME=tic-tac-toe TARGET=sdl2                 — build + run native SDL2
+#   make build GAME=five-in-the-row ARCH=risc2              — build ROM only
+#   make run   GAME=tic-tac-toe ARCH=risc2 TARGET=fpga      — synthesize bitfile
+#   make run   GAME=char-snake ARCH=risc1 TARGET=gtkwave    — iverilog waveform sim
+#   make clean                                              — clean everything
+
+# TARGETs:
+#   sdl2      — native desktop build (game's own SDL2 port, gcc)
+#   verilator — desktop sim running actual Verilog (Verilator + SDL2)
+#   fpga      — yosys/nextpnr synthesis → bitfile for real hardware
+#   gtkwave   — iverilog simulation → VCD waveform
+
+# Prevent TARGET from leaking into sub-Makefiles (many use TARGET for binary name)
+MAKEOVERRIDES := $(filter-out TARGET=%,$(MAKEOVERRIDES))
+
+# ── Game/platform matrix ────────────────────────────────────────────────────
+GAMES_RISC1 = char-snake
+GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess
+GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess
+
+.PHONY: all build run clean all-sdl2 all-risc1 all-risc2 gcasm
+
+# ── Build gcasm (assembler) ────────────────────────────────────────────────
+gcasm:
+	$(MAKE) -C util/gcasm
+
+# ── Build everything ────────────────────────────────────────────────────────
+all: gcasm all-sdl2 all-risc1 all-risc2
+
+all-sdl2:
+	@for g in $(GAMES_SDL2); do \
+	    echo "=== $$g (sdl2) ===" && \
+	    $(MAKE) build GAME=$$g TARGET=sdl2; \
+	done
+
+all-risc1: gcasm
+	@for g in $(GAMES_RISC1); do \
+	    echo "=== $$g (risc1) ===" && \
+	    $(MAKE) build GAME=$$g ARCH=risc1; \
+	done
+
+all-risc2: gcasm
+	@for g in $(GAMES_RISC2); do \
+	    echo "=== $$g (risc2) ===" && \
+	    $(MAKE) build GAME=$$g ARCH=risc2; \
+	done
+
+# ── Build a single game ────────────────────────────────────────────────────
+build: gcasm
+	@test -n "$(GAME)" || { echo "Usage: make build GAME=<game> [ARCH=<arch>] [TARGET=sdl2]"; exit 1; }
+	@if [ "$(TARGET)" = "sdl2" ]; then \
+	    echo "Building $(GAME) for SDL2..." && \
+	    if [ -d "games/$(GAME)/src/platform/sdl2" ] && [ -f "games/$(GAME)/src/platform/sdl2/Makefile" ]; then \
+	        $(MAKE) -C games/$(GAME)/src/platform/sdl2; \
+	    else \
+	        $(MAKE) -C games/$(GAME); \
+	    fi; \
+	elif [ "$(ARCH)" = "risc1" ]; then \
+	    echo "Building $(GAME) for RISC1..." && \
+	    $(MAKE) -C games/$(GAME); \
+	elif [ -n "$(ARCH)" ]; then \
+	    echo "Building $(GAME) for $(ARCH)..." && \
+	    $(MAKE) -C games/$(GAME)/src/platform/$(ARCH); \
+	else \
+	    echo "Error: specify ARCH=<arch> or TARGET=sdl2"; exit 1; \
+	fi
+
+# ── Build + run ─────────────────────────────────────────────────────────────
+run: build
+	@if [ "$(TARGET)" = "sdl2" ]; then \
+	    if [ -d "games/$(GAME)/src/platform/sdl2" ] && [ -f "games/$(GAME)/src/platform/sdl2/Makefile" ]; then \
+	        cd games/$(GAME)/src/platform/sdl2 && ./$(GAME); \
+	    else \
+	        $(MAKE) -C games/$(GAME) run; \
+	    fi; \
+	elif [ "$(TARGET)" = "verilator" ] || [ "$(TARGET)" = "fpga" ] || [ "$(TARGET)" = "gtkwave" ]; then \
+	    if [ "$(ARCH)" = "risc1" ]; then \
+	        $(MAKE) -C games/$(GAME) copy && \
+	        if [ "$(TARGET)" = "verilator" ]; then $(MAKE) -C arch/risc1/sim-desktop run; \
+	        elif [ "$(TARGET)" = "fpga" ]; then cd arch/risc1 && bash run.sh; \
+	        else cd arch/risc1 && bash simulate.sh; fi; \
+	    else \
+	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-$(TARGET); \
+	    fi; \
+	else \
+	    echo "Error: specify TARGET=sdl2|verilator|fpga|gtkwave"; exit 1; \
+	fi
+
+# ── Clean everything ───────────────────────────────────────────────────────
+clean:
+	@echo "Cleaning games..."
+	@for d in $$(find games -name Makefile -path '*/platform/*/Makefile' -exec dirname {} \;); do \
+	    $(MAKE) -C "$$d" clean 2>/dev/null || true; \
+	done
+	@$(MAKE) -C games/char-snake clean 2>/dev/null || true
+	@echo "Cleaning simulators..."
+	@for d in arch/*/sim-desktop; do \
+	    [ -f "$$d/Makefile" ] && $(MAKE) -C "$$d" clean 2>/dev/null || true; \
+	done
+	@echo "Cleaning ROM artifacts..."
+	@rm -f arch/*/rom.bin arch/*/rom.hex arch/*/romL.vh arch/*/romH.vh arch/*/rom.vh
+	@echo "Cleaning gcasm..."
+	@$(MAKE) -C util/gcasm clean 2>/dev/null || true

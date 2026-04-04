@@ -1,0 +1,87 @@
+[*]
+[*] GTKWave Analyzer v3.4.0 (w)1999-2022 BSI
+[*] Sun Aug 10 20:55:39 2025
+[*]
+[dumpfile] "/Users/bereg/fpga_gameconsole/project/risc2-video/out.vcd"
+[dumpfile_mtime] "Sun Aug 10 20:53:30 2025"
+[dumpfile_size] 14494764
+[savefile] "/Users/bereg/fpga_gameconsole/project/risc2-video/1.gtkw"
+[timestart] 999
+[size] 1440 762
+[pos] -1 -1
+*-4.179727 1041 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+[markername] AA
+[markername] BB
+[markername] CC
+[markername] DD
+[markername] EE
+[markername] FF
+[markername] GG
+[markername] HH
+[markername] II
+[markername] JJ
+[markername] KK
+[markername] LL
+[markername] MM
+[markername] NN
+[markername] OO
+[markername] PP
+[markername] QQ
+[markername] RR
+[markername] SS
+[markername] TT
+[markername] UU
+[markername] VV
+[markername] WW
+[markername] XX
+[markername] YY
+[markername] ZZ
+[treeopen] testbench.
+[treeopen] testbench.game0.
+[treeopen] testbench.game0.soc0.
+[sst_width] 240
+[signals_width] 193
+[sst_expanded] 1
+[sst_vpaned_height] 395
+@28
+testbench.game0.soc0.cpu0.clk_en
+@22
+testbench.game0.soc0.cpu0.instr_addr[23:0]
+testbench.game0.soc0.cpu0.stage[2:0]
+testbench.game0.soc0.cpu0.instr_value[31:0]
+testbench.game0.soc0.cpu0.data_addr[23:0]
+testbench.game0.soc0.cpu0.data_out_value[31:0]
+@28
+testbench.game0.soc0.cpu0.data_wr
+@22
+testbench.game0.soc0.cpu0.data_in_value[31:0]
+@28
+testbench.game0.soc0.cpu0.data_rd
+@22
+testbench.game0.soc0.cpu0.reg0[31:0]
+testbench.game0.soc0.cpu0.opa[31:0]
+testbench.game0.soc0.cpu0.opb[31:0]
+testbench.game0.soc0.cpu0.reg1[31:0]
+testbench.game0.soc0.cpu0.reg2[31:0]
+testbench.game0.soc0.cpu0.reg3[31:0]
+@28
+testbench.game0.soc0.rxen
+@22
+testbench.game0.soc0.rxdata[7:0]
+@28
+testbench.game0.soc0.txen
+@22
+testbench.game0.soc0.txdata[7:0]
+@28
+testbench.game0.soc0.tx
+testbench.game0.soc0.sled1
+testbench.game0.soc0.sled2
+testbench.game0.soc0.cpu0.irq
+testbench.game0.soc0.cpu0.irq_num[2:0]
+testbench.game0.soc0.cpu0.irq_ack
+@22
+testbench.game0.soc0.timer0.preDivider[7:0]
+@23
+testbench.game0.soc0.timer0.divider[7:0]
+[pattern_trace] 1
+[pattern_trace] 0

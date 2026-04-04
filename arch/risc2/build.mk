@@ -1,0 +1,69 @@
+# arch/risc2/build.mk — Shared RISC2 C→ROM build pipeline
+#
+# Include from a game's platform/risc2/Makefile after setting:
+#   GAME_SRCS    — C source files (e.g., game.c render.c main.c)
+#   EXTRA_CFLAGS — additional clang flags (optional, e.g., -fno-builtin)
+#   INCLUDE_DIRS — header search dirs (default: ../../hal ../../engine)
+#   VPATH_DIRS   — source search dirs (default: . ../../engine)
+#
+# Provides targets:
+#   all          — build rom.bin
+#   install      — copy ROM files to arch/risc2/
+#   run-verilator — install + run Verilator SDL2 simulator
+#   run-fpga     — install + synthesize + program FPGA
+#   run-gtkwave  — install + iverilog waveform sim
+#   clean
+
+REPO_ROOT    ?= ../../../../../
+ARCH_DIR     ?= $(REPO_ROOT)arch/risc2
+CLANG        ?= ~/llvm-risc2-build/bin/clang
+GCASM        ?= $(REPO_ROOT)util/gcasm/gcasm
+INCLUDE_DIRS ?= ../../hal ../../engine
+VPATH_DIRS   ?= . ../../engine
+
+vpath %.c $(VPATH_DIRS)
+
+BASE_CFLAGS = --target=risc2 -O1 -S -x c -fno-jump-tables \
+              $(addprefix -I,$(INCLUDE_DIRS))
+ALL_CFLAGS  = $(BASE_CFLAGS) $(EXTRA_CFLAGS)
+
+# Work around LLVM RISC2 frame-index lowering bug:
+#   mov r7, r14 / add r7, #off / add rX, #0  →  mov rX, r14 / add rX, #off
+FIX_FRAME = perl -0pe \
+    's/\tmov r7, r14\n\tadd r7, \#([0-9a-f]+)\n\tadd (r\d+), \#0/\tmov $$2, r14\n\tadd $$2, \#$$1/g'
+
+# Derive .asm filenames from C sources (strip path, swap extension)
+GAME_ASM = $(notdir $(GAME_SRCS:.c=.asm))
+ALL_ASM  = $(ARCH_DIR)/startup.s $(ARCH_DIR)/runtime.s $(GAME_ASM)
+
+# ── Build targets ───────────────────────────────────────────────────────────
+.PHONY: all clean install run-verilator run-fpga run-gtkwave
+
+all: rom.bin
+
+rom.bin: $(ALL_ASM)
+	$(GCASM) -crisc2 $(ALL_ASM)
+
+# Compile C → RISC2 assembly.
+# Label prefix is the uppercased filename stem (GAME, RENDER, MAIN, etc.)
+# to avoid gcasm label collisions across files sharing one namespace.
+%.asm: %.c
+	$(CLANG) $(ALL_CFLAGS) $< -o $@.tmp
+	sed "s/_LBB/_$$(echo $* | tr a-z A-Z)_LBB/g" $@.tmp | $(FIX_FRAME) > $@
+	@rm -f $@.tmp
+
+install: rom.bin
+	cp rom.bin romL.vh romH.vh romL2.vh romH2.vh rom.hex $(ARCH_DIR)/
+
+# ── Architecture run targets ────────────────────────────────────────────────
+run-verilator: install
+	$(MAKE) -C $(ARCH_DIR)/sim-desktop run
+
+run-fpga: install
+	cd $(ARCH_DIR) && bash run.sh
+
+run-gtkwave: install
+	cd $(ARCH_DIR) && bash simulate.sh
+
+clean:
+	rm -f $(GAME_ASM) *.asm.tmp rom.bin romL.vh romH.vh romL2.vh romH2.vh rom.hex

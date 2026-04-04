@@ -1,0 +1,3 @@
+Desktop simulation started.
+LCD: 480 x 272  window: 960 x 544
+UART keys: S=step  C=continue  P=print-regs  R=reset-CPU

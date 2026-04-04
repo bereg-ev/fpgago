@@ -1,0 +1,82 @@
+# RISC2 LLVM Backend — Reproduction Guide
+# Tested with LLVM / Clang 22 (llvmorg-19.1.0 branch + later commits)
+# Archive: ~/risc2-backend.tar.gz  SHA256: d2376f2cae95e7c3f9bb7eca667f4afa394d7f9ec079cd823895f1639193dad6
+
+# ──────────────────────────────────────────────────────────────────────────
+# FROM THE ARCHIVE (fresh machine)
+# ──────────────────────────────────────────────────────────────────────────
+
+# 1. Unpack the backend into the project tree
+tar -xzf risc2-backend.tar.gz -C /path/to/fpga_gameconsole/cpu/risc2/
+#    produces: cpu/risc2/llvm-backend/
+
+# 2. Clone LLVM (shallow clone is fine)
+git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
+
+# 3. Integrate — symlinks the backend + applies tree_modifications.patch
+cd /path/to/fpga_gameconsole/cpu/risc2/llvm-backend
+bash setup-llvm.sh ~/llvm-project
+#    patch covers (all in one file — patches/tree_modifications.patch):
+#      llvm/CMakeLists.txt                    add RISC2 to LLVM_ALL_TARGETS
+#      llvm/include/llvm/TargetParser/Triple.h  add risc2 ArchType enum entry
+#      llvm/lib/TargetParser/Triple.cpp       name/parse/endian/pointer tables
+#      clang/lib/Basic/CMakeLists.txt         add Targets/RISC2.cpp
+#      clang/lib/Basic/Targets.cpp            add risc2 case in AllocateTarget
+#      clang/lib/Basic/Targets/RISC2.h        new — clang TargetInfo header
+#      clang/lib/Basic/Targets/RISC2.cpp      new — macro definitions
+
+# 4. Configure
+cmake -S ~/llvm-project/llvm -B ~/llvm-risc2-build \
+      -DLLVM_TARGETS_TO_BUILD="RISC2" \
+      -DLLVM_ENABLE_PROJECTS="clang" \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -G Ninja
+
+# 5. Build  (~5-10 min on modern hardware, debug mode)
+ninja -C ~/llvm-risc2-build clang llc
+
+# ──────────────────────────────────────────────────────────────────────────
+# QUICK SMOKE TEST
+# ──────────────────────────────────────────────────────────────────────────
+
+echo 'int get42(){return 42;}' | \
+  ~/llvm-risc2-build/bin/clang --target=risc2 -S -x c - -o -
+# Expected output includes: mov r0, #2a  /  ret
+
+# End-to-end with gcasm:
+echo 'int add(int a,int b){return a+b;}' | \
+  ~/llvm-risc2-build/bin/clang --target=risc2 -O1 -S -x c - -o /tmp/t.asm
+/path/to/fpga_gameconsole/asm-compiler/gcasm -crisc2 /tmp/t.asm
+# Expected: rom.bin / romL.vh / romH.vh produced, gcasm exits 0
+
+# ──────────────────────────────────────────────────────────────────────────
+# IF YOU ALREADY HAVE AN LLVM CHECKOUT (in-place update)
+# ──────────────────────────────────────────────────────────────────────────
+
+# setup-llvm.sh is idempotent:
+#   - the symlink is created with ln -snf (safe to re-run)
+#   - the patch is skipped if Triple.h already contains 'risc2'
+# So just re-run:
+bash setup-llvm.sh ~/llvm-project
+ninja -C ~/llvm-risc2-build clang llc
+
+# ──────────────────────────────────────────────────────────────────────────
+# WHAT IS WHERE
+# ──────────────────────────────────────────────────────────────────────────
+#
+# cpu/risc2/llvm-backend/            ← this directory (symlinked into LLVM)
+#   setup-llvm.sh                    ← integration script (run once)
+#   patches/tree_modifications.patch ← all out-of-tree LLVM edits (1 patch)
+#   RISC2*.{h,cpp,td}               ← backend source
+#   MCTargetDesc/                    ← MC layer (asm info, inst printer, ...)
+#   TargetInfo/                      ← RegisterTarget<> call
+#
+# Key design decisions:
+#   R14 = SP (grows down), R15 = LR (clobbered by CALL)
+#   Calling conv: R0-R3 args/ret, R8-R13 callee-saved, R15 saved by non-leaf
+#   Signed comparisons: XOR-flip MSB on both operands → unsigned CMP
+#   IMM prefix: AsmPrinter emits "imm #upper12" for immediates > 20 bits
+#   R15 liveness: RISC2LinkRegLiveInPass adds R15 live-in to every BB
+#                 before regalloc (satisfies LLVM debug assertions)
+#   Non-leaf R15 save: RISC2FrameLowering::determineCalleeSaves forces
+#                      R15 into SavedRegs when MF.hasCalls()
