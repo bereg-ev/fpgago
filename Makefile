@@ -23,7 +23,11 @@ GAMES_RISC1 = char-snake
 GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess
 GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess
 
-.PHONY: all build run clean all-sdl2 all-risc1 all-risc2 gcasm
+.PHONY: all build run clean all-sdl2 all-risc1 all-risc2 gcasm check-deps
+
+# ── Check dependencies ─────────────────────────────────────────────────────
+check-deps:
+	@bash setup.sh check
 
 # ── Build gcasm (assembler) ────────────────────────────────────────────────
 gcasm:
