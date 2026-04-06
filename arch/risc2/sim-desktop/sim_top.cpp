@@ -30,6 +30,9 @@
 #include "Vsoc.h"
 #include "Vsoc___024root.h"
 
+/* Verilator ≥5 requires this symbol even with --no-timing */
+double sc_time_stamp() { return 0; }
+
 #include <SDL.h>
 
 /* ── LCD frame dimensions — must match SIMULATION_SDL values in lcd_out.v ── */
