@@ -199,3 +199,22 @@ index a4f9dd42c..fda4fc19d 100644
      return true;
    default:
      return false;
+diff --git a/llvm/include/llvm/IR/RuntimeLibcalls.td b/llvm/include/llvm/IR/RuntimeLibcalls.td
+--- a/llvm/include/llvm/IR/RuntimeLibcalls.td
++++ b/llvm/include/llvm/IR/RuntimeLibcalls.td
+@@ -3180,6 +3180,15 @@
+ //===----------------------------------------------------------------------===//
+ // RISCV Runtime Libcalls
+ //===----------------------------------------------------------------------===//
++
++//===----------------------------------------------------------------------===//
++// RISC2 Runtime Libcalls
++//===----------------------------------------------------------------------===//
++
++def isRISC2 : RuntimeLibcallPredicate<"TT.getArch() == Triple::risc2">;
++def RISC2SystemLibrary
++    : SystemRuntimeLibrary<isRISC2, (add DefaultLibcallImpls32)>;
++
+
+ def isRISCV : RuntimeLibcallPredicate<"TT.isRISCV()">;
+ def isRISCV64 : RuntimeLibcallPredicate<"TT.isRISCV64()">;

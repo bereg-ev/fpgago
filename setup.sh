@@ -271,10 +271,9 @@ do_llvm() {
 
     echo ""
     ok "RISC2 Clang built at $LLVM_BUILD/bin/clang"
-    ok "Config written to .config.mk"
     echo ""
     echo "Test it:"
-    echo "  make run GAME=tic-tac-toe TARGET=sdl2"
+    echo "  make run GAME=tic-tac-toe ARCH=risc2 TARGET=verilator"
 }
 
 # ── Main ────────────────────────────────────────────────────────────────────

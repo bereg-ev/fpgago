@@ -13,7 +13,6 @@ RISC2MCAsmInfo::RISC2MCAsmInfo(const Triple &TT) {
 
   // Local label prefix — must NOT start with '.' because gcasm checks for
   // '.' before checking for ':' (label), so .Lxxx would fail as "unknown keyword"
-  PrivateGlobalPrefix = "_L";
   PrivateLabelPrefix  = "_L";
 
   // Data directives matching gcasm syntax
