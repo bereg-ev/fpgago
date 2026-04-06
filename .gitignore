@@ -58,3 +58,4 @@ dkms.conf
 .config.mk
 llvm-project/
 llvm-risc2-build/
+oss-cad-suite/
