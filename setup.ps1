@@ -115,21 +115,21 @@ function Invoke-Check {
     if (Get-Msys2Bash) {
         Write-Ok "Found at $(Split-Path -Parent (Split-Path -Parent (Get-Msys2Bash)))"
     } else {
-        Write-Fail "Not found (run .\setup.ps1 to install)"
+        Write-Fail "Not found (run setup.bat to install)"
     }
 
     Write-Info "OSS CAD Suite"
     if (Test-Path (Join-Path $OssCadDir "bin\nextpnr-ecp5.exe")) {
         Write-Ok "Installed at $OssCadDir"
     } else {
-        Write-Fail "Not found (run .\setup.ps1 to install)"
+        Write-Fail "Not found (run setup.bat to install)"
     }
 
     Write-Info "LLVM source"
     if (Test-Path (Join-Path $LlvmSrc "llvm\CMakeLists.txt")) {
         Write-Ok "Found at $LlvmSrc"
     } else {
-        Write-Fail "Not found (run .\setup.ps1 to download)"
+        Write-Fail "Not found (run setup.bat to download)"
     }
 
     Write-Info "RISC2 Clang"
@@ -148,7 +148,7 @@ function Invoke-Check {
     } elseif (Test-Path $clangExe) {
         Write-Ok "RISC2 Clang at $clangExe"
     } else {
-        Write-Warn "RISC2 Clang not built (run .\setup.ps1 llvm -- only needed for C games)"
+        Write-Warn "RISC2 Clang not built (run setup.bat llvm -- only needed for C games)"
     }
 
     $env:PATH = $savedPath
@@ -312,13 +312,13 @@ function Invoke-Install {
     Write-ConfigMk
 
     Write-Host ""
-    Write-Info "Done! Verify with: .\setup.ps1 check"
+    Write-Info "Done! Verify with: setup.bat check"
     Write-Host ""
     Write-Host "Quick start (assembly games -- no LLVM build needed):"
-    Write-Host "  make run GAME=char-snake ARCH=risc1 TARGET=verilator"
+    Write-Host "  .\make run GAME=char-snake ARCH=risc1 TARGET=verilator"
     Write-Host ""
     Write-Host "For C games (gomoku, chess, labyrinth, ...), build LLVM first:"
-    Write-Host "  .\setup.ps1 llvm"
+    Write-Host "  setup.bat llvm"
     Write-Host ""
 }
 
@@ -327,7 +327,7 @@ function Invoke-Install {
 function Invoke-LlvmBuild {
     if (-not (Test-Path (Join-Path $LlvmSrc "llvm\CMakeLists.txt"))) {
         Write-Fail "LLVM source not found at $LlvmSrc"
-        Write-Fail "Run .\setup.ps1 first to download it."
+        Write-Fail "Run setup.bat first to download it."
         exit 1
     }
 
@@ -357,7 +357,7 @@ function Invoke-LlvmBuild {
     Write-Ok "RISC2 Clang built at $(Join-Path $LlvmBuild 'bin\clang.exe')"
     Write-Host ""
     Write-Host "Test it:"
-    Write-Host "  make run GAME=tic-tac-toe ARCH=risc2 TARGET=verilator"
+    Write-Host "  .\make run GAME=tic-tac-toe ARCH=risc2 TARGET=verilator"
 }
 
 # ── Main ────────────────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ switch ($Command) {
     "llvm"    { Invoke-LlvmBuild }
     "check"   { Invoke-Check }
     "help" {
-        Write-Host "Usage: .\setup.ps1 [install|llvm|check]"
+        Write-Host "Usage: setup.bat [install|llvm|check]"
         Write-Host ""
         Write-Host "  install   Install all dependencies and download LLVM source (default)"
         Write-Host "  llvm      Build the RISC2 LLVM/Clang backend (needed for C games)"
