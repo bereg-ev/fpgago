@@ -53,3 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# setup.sh generated files
+.config.mk
+llvm-project/
+llvm-risc2-build/

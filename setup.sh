@@ -2,19 +2,16 @@
 # setup.sh — Install FPGAgo project dependencies
 #
 # Usage:
-#   ./setup.sh              Install base dependencies (enough for SDL2 games)
-#   ./setup.sh base         Same as above
-#   ./setup.sh sim          Base + HDL simulation (Verilator, iverilog, GTKWave)
-#   ./setup.sh fpga         Sim  + FPGA synthesis  (Yosys, nextpnr, ecppack)
-#   ./setup.sh full         FPGA + LLVM custom backend (CMake, Ninja, LLVM source)
-#   ./setup.sh check        Check which tools are already installed
-#
-# Tiers build on each other:  base ⊂ sim ⊂ fpga ⊂ full
+#   ./setup.sh          Install all dependencies and download LLVM source
+#   ./setup.sh llvm     Build the RISC2 LLVM/Clang backend (needed for C games)
+#   ./setup.sh check    Check which tools are already installed
 
 set -euo pipefail
 
-TIER="${1:-base}"
+CMD="${1:-install}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LLVM_SRC="$SCRIPT_DIR/llvm-project"
+LLVM_BUILD="$SCRIPT_DIR/llvm-risc2-build"
 
 # ── Colors (disabled when piped) ────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -49,11 +46,11 @@ OS="$(detect_os)"
 has() { command -v "$1" >/dev/null 2>&1; }
 
 check_tool() {
-    local cmd="$1" tier="$2" note="${3:-}"
+    local cmd="$1" note="${2:-}"
     if has "$cmd"; then
-        ok "$cmd  ($tier)  $(command -v "$cmd")"
+        ok "$cmd  $(command -v "$cmd")"
     else
-        fail "$cmd  ($tier)${note:+  — $note}"
+        fail "$cmd${note:+  — $note}"
     fi
 }
 
@@ -61,166 +58,150 @@ do_check() {
     info "Checking installed tools..."
     echo ""
 
-    printf "${BOLD}%-20s %-8s %s${RESET}\n" "TOOL" "TIER" "STATUS"
+    printf "${BOLD}%-20s %s${RESET}\n" "TOOL" "STATUS"
     echo "────────────────────────────────────────────"
 
-    # base
-    check_tool gcc        base
-    check_tool make       base
-    check_tool python3    base
-    check_tool sdl2-config base "SDL2 development library"
-
-    # sim
-    check_tool verilator  sim
-    check_tool iverilog   sim
-    check_tool gtkwave    sim
-
-    # fpga
-    check_tool yosys      fpga
-    check_tool nextpnr-ecp5 fpga
-    check_tool ecppack    fpga
-
-    # full (LLVM)
-    check_tool cmake      full
-    check_tool ninja      full  "or ninja-build"
+    check_tool gcc
+    check_tool make
+    check_tool python3
+    check_tool sdl2-config    "SDL2 development library"
+    check_tool verilator
+    check_tool iverilog
+    check_tool gtkwave
+    check_tool yosys
+    check_tool nextpnr-ecp5
+    check_tool ecppack
+    check_tool cmake
+    check_tool ninja          "or ninja-build"
 
     echo ""
-    if [ -x "$HOME/llvm-risc2-build/bin/clang" ]; then
-        ok "RISC2 Clang found at ~/llvm-risc2-build/bin/clang"
+    info "LLVM source"
+    if [ -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
+        ok "LLVM source found at $LLVM_SRC"
     else
-        warn "RISC2 Clang not found at ~/llvm-risc2-build/bin/clang"
-        warn "Build it with: ./setup.sh full"
+        fail "LLVM source not found (run ./setup.sh to download)"
+    fi
+
+    info "RISC2 Clang"
+    if [ -f "$SCRIPT_DIR/.config.mk" ]; then
+        local clang_path
+        clang_path=$(grep '^CLANG' "$SCRIPT_DIR/.config.mk" | sed 's/.*= *//')
+        if [ -x "$clang_path" ]; then
+            ok "RISC2 Clang at $clang_path"
+        else
+            fail "RISC2 Clang configured in .config.mk but not found at $clang_path"
+        fi
+    elif [ -x "$LLVM_BUILD/bin/clang" ]; then
+        ok "RISC2 Clang at $LLVM_BUILD/bin/clang (no .config.mk yet — run ./setup.sh llvm)"
+    else
+        warn "RISC2 Clang not built (run ./setup.sh llvm — only needed for C games)"
     fi
 }
 
-# ── Package installation helpers ────────────────────────────────────────────
+# ── Install all system dependencies + download LLVM source ─────────────────
 
-install_base() {
-    info "Installing base dependencies (gcc, make, python3, SDL2)..."
+do_install() {
+    info "Installing system packages..."
     case "$OS" in
         macos)
-            brew install gcc make python3 sdl2
-            ;;
-        debian)
-            sudo apt-get update
-            sudo apt-get install -y build-essential python3 libsdl2-dev
-            ;;
-        fedora)
-            sudo dnf install -y gcc gcc-c++ make python3 SDL2-devel
-            ;;
-        arch)
-            sudo pacman -S --needed gcc make python sdl2
-            ;;
-        windows)
-            warn "Windows detected. Recommended: use WSL2 with Ubuntu, then re-run this script."
-            warn "Alternatively, in MSYS2 run:"
-            echo "  pacman -S mingw-w64-x86_64-gcc make python mingw-w64-x86_64-SDL2"
-            ;;
-        *)
-            fail "Unsupported OS. Install manually: gcc, make, python3, SDL2 dev libraries."
-            exit 1
-            ;;
-    esac
-}
-
-install_sim() {
-    install_base
-    echo ""
-    info "Installing simulation tools (Verilator, iverilog, GTKWave)..."
-    case "$OS" in
-        macos)
-            brew install verilator icarus-verilog
+            brew install gcc make python3 sdl2 \
+                         verilator icarus-verilog \
+                         yosys nextpnr prjtrellis \
+                         cmake ninja
             if ! has gtkwave; then
                 warn "GTKWave: 'brew install gtkwave' may not be available."
                 warn "Download from: https://gtkwave.sourceforge.net/"
             fi
             ;;
         debian)
-            sudo apt-get install -y verilator iverilog gtkwave
+            sudo apt-get update
+            sudo apt-get install -y \
+                build-essential python3 libsdl2-dev \
+                verilator iverilog gtkwave \
+                yosys nextpnr-ecp5 prjtrellis \
+                cmake ninja-build
             ;;
         fedora)
-            sudo dnf install -y verilator iverilog gtkwave
+            sudo dnf install -y \
+                gcc gcc-c++ make python3 SDL2-devel \
+                verilator iverilog gtkwave \
+                yosys nextpnr prjtrellis \
+                cmake ninja-build
             ;;
         arch)
-            sudo pacman -S --needed verilator iverilog gtkwave
+            sudo pacman -S --needed \
+                gcc make python sdl2 \
+                verilator iverilog gtkwave \
+                yosys nextpnr-ecp5 prjtrellis \
+                cmake ninja
             ;;
         windows)
-            warn "For simulation tools on Windows, use OSS CAD Suite:"
-            echo "  https://github.com/YosysHQ/oss-cad-suite-build/releases"
-            echo "  Download, extract, and source the environment.sh script."
-            ;;
-    esac
-}
-
-install_fpga() {
-    install_sim
-    echo ""
-    info "Installing FPGA synthesis tools (Yosys, nextpnr-ecp5, ecppack)..."
-    case "$OS" in
-        macos)
-            brew install yosys nextpnr
-            if ! has ecppack; then
-                warn "ecppack is usually bundled with nextpnr or prjtrellis."
-                brew install prjtrellis 2>/dev/null || \
-                    warn "Install prjtrellis manually for ecppack."
-            fi
-            ;;
-        debian)
-            sudo apt-get install -y yosys nextpnr-ecp5 prjtrellis
-            ;;
-        fedora)
-            sudo dnf install -y yosys nextpnr prjtrellis
-            ;;
-        arch)
-            sudo pacman -S --needed yosys nextpnr-ecp5 prjtrellis
-            ;;
-        windows)
-            warn "For FPGA tools on Windows, use OSS CAD Suite:"
+            warn "Windows detected. Recommended: use WSL2 with Ubuntu, then re-run this script."
+            warn "Alternatively, in MSYS2:"
+            echo "  pacman -S mingw-w64-x86_64-gcc make python mingw-w64-x86_64-SDL2"
+            warn "For FPGA/simulation tools, use OSS CAD Suite:"
             echo "  https://github.com/YosysHQ/oss-cad-suite-build/releases"
             ;;
+        *)
+            fail "Unsupported OS. Install manually: gcc, make, python3, SDL2, verilator,"
+            fail "  iverilog, gtkwave, yosys, nextpnr-ecp5, ecppack, cmake, ninja"
+            exit 1
+            ;;
     esac
+
+    echo ""
+    info "Downloading LLVM source (shallow clone, ~500 MB)..."
+    if [ -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
+        ok "LLVM source already present at $LLVM_SRC"
+    else
+        git clone --depth 1 https://github.com/llvm/llvm-project.git "$LLVM_SRC"
+        ok "LLVM source cloned to $LLVM_SRC"
+    fi
+
+    info "Patching LLVM with RISC2 backend..."
+    bash "$SCRIPT_DIR/arch/risc2/cpu/llvm-backend/setup-llvm.sh" "$LLVM_SRC"
+
+    echo ""
+    info "Done! Verify with: ./setup.sh check"
+    echo ""
+    echo "Quick start (assembly games — no LLVM build needed):"
+    echo "  make run GAME=char-snake ARCH=risc1 TARGET=verilator"
+    echo ""
+    echo "For C games (gomoku, chess, labyrinth, ...), build LLVM first:"
+    echo "  ./setup.sh llvm"
+    echo ""
 }
 
-install_full() {
-    install_fpga
-    echo ""
-    info "Installing LLVM build prerequisites (CMake, Ninja)..."
-    case "$OS" in
-        macos)
-            brew install cmake ninja
-            ;;
-        debian)
-            sudo apt-get install -y cmake ninja-build
-            ;;
-        fedora)
-            sudo dnf install -y cmake ninja-build
-            ;;
-        arch)
-            sudo pacman -S --needed cmake ninja
-            ;;
-        windows)
-            warn "Install CMake and Ninja via MSYS2:"
-            echo "  pacman -S cmake ninja"
-            ;;
-    esac
+# ── Build LLVM with RISC2 backend ──────────────────────────────────────────
+
+do_llvm() {
+    if [ ! -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
+        fail "LLVM source not found at $LLVM_SRC"
+        fail "Run ./setup.sh first to download it."
+        exit 1
+    fi
+
+    info "Building RISC2 LLVM/Clang (this will take a while)..."
+    cmake -S "$LLVM_SRC/llvm" -B "$LLVM_BUILD" \
+          -DLLVM_TARGETS_TO_BUILD="RISC2" \
+          -DLLVM_ENABLE_PROJECTS="clang" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -G Ninja
+
+    ninja -C "$LLVM_BUILD" clang llc
+
+    # Write config so the build system finds clang automatically
+    cat > "$SCRIPT_DIR/.config.mk" <<EOF
+# Generated by setup.sh llvm — do not edit, do not commit
+CLANG = $LLVM_BUILD/bin/clang
+EOF
 
     echo ""
-    info "Building RISC2 LLVM/Clang backend..."
+    ok "RISC2 Clang built at $LLVM_BUILD/bin/clang"
+    ok "Config written to .config.mk"
     echo ""
-    echo "  This requires an LLVM source checkout (~2 GB download, ~30 min build)."
-    echo ""
-    echo "  Steps:"
-    echo "    1. git clone --depth 1 https://github.com/llvm/llvm-project.git ~/llvm-project"
-    echo "    2. bash $SCRIPT_DIR/arch/risc2/cpu/llvm-backend/setup-llvm.sh ~/llvm-project"
-    echo "    3. cmake -S ~/llvm-project/llvm -B ~/llvm-risc2-build \\"
-    echo "             -DLLVM_TARGETS_TO_BUILD='RISC2' \\"
-    echo "             -DLLVM_ENABLE_PROJECTS='clang' \\"
-    echo "             -DCMAKE_BUILD_TYPE=Release \\"
-    echo "             -G Ninja"
-    echo "    4. ninja -C ~/llvm-risc2-build clang llc"
-    echo ""
-    warn "This is not automated because it takes significant time and disk space."
-    warn "Run the steps above manually when you're ready."
+    echo "Test it:"
+    echo "  make run GAME=tic-tac-toe TARGET=sdl2"
 }
 
 # ── Main ────────────────────────────────────────────────────────────────────
@@ -230,28 +211,16 @@ echo "  FPGAgo Development Setup"
 echo "  OS detected: $OS"
 echo ""
 
-case "$TIER" in
-    base)  install_base ;;
-    sim)   install_sim ;;
-    fpga)  install_fpga ;;
-    full)  install_full ;;
-    check) do_check; exit 0 ;;
+case "$CMD" in
+    install) do_install ;;
+    llvm)    do_llvm ;;
+    check)   do_check ;;
     *)
-        echo "Usage: $0 [base|sim|fpga|full|check]"
+        echo "Usage: $0 [install|llvm|check]"
         echo ""
-        echo "Tiers:"
-        echo "  base   gcc, make, python3, SDL2          (play games natively)"
-        echo "  sim    + verilator, iverilog, gtkwave     (HDL simulation)"
-        echo "  fpga   + yosys, nextpnr-ecp5, ecppack    (synthesize to FPGA)"
-        echo "  full   + cmake, ninja, LLVM source        (build RISC2 C compiler)"
-        echo "  check  show which tools are installed"
+        echo "  install   Install all dependencies and download LLVM source (default)"
+        echo "  llvm      Build the RISC2 LLVM/Clang backend (needed for C games)"
+        echo "  check     Show which tools are installed"
         exit 1
         ;;
 esac
-
-echo ""
-info "Done! Verify with: ./setup.sh check"
-echo ""
-echo "Quick start:"
-echo "  make run GAME=tic-tac-toe TARGET=sdl2"
-echo ""
