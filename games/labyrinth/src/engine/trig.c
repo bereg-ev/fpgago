@@ -9,6 +9,7 @@
  *   Then remove trig_init() and the <math.h> include entirely.
  */
 
+#define _DEFAULT_SOURCE   /* M_PI on glibc with strict -std=c11 */
 #include <math.h>
 #include "trig.h"
 
