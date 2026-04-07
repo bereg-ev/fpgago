@@ -9,9 +9,10 @@
  *   Then remove trig_init() and the <math.h> include entirely.
  */
 
-#define _DEFAULT_SOURCE    /* M_PI on glibc with strict -std=c11 */
-#define _USE_MATH_DEFINES  /* M_PI on MSVC / MinGW */
 #include <math.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 #include "trig.h"
 
 fixed_t sin_table[ANGLE_COUNT];
