@@ -136,16 +136,14 @@ do_check() {
     fi
 
     info "RISC2 Clang"
+    local clang_path=""
     if [ -f "$SCRIPT_DIR/.config.mk" ]; then
-        local clang_path
-        clang_path=$(grep '^CLANG' "$SCRIPT_DIR/.config.mk" | sed 's/.*= *//')
-        if [ -x "$clang_path" ]; then
-            ok "RISC2 Clang at $clang_path"
-        else
-            fail "RISC2 Clang configured in .config.mk but not found at $clang_path"
-        fi
+        clang_path=$(grep '^CLANG' "$SCRIPT_DIR/.config.mk" | sed 's/.*= *//' || true)
+    fi
+    if [ -n "$clang_path" ] && [ -x "$clang_path" ]; then
+        ok "RISC2 Clang at $clang_path"
     elif [ -x "$LLVM_BUILD/bin/clang" ]; then
-        ok "RISC2 Clang at $LLVM_BUILD/bin/clang (no .config.mk yet — run ./setup.sh llvm)"
+        ok "RISC2 Clang at $LLVM_BUILD/bin/clang"
     else
         warn "RISC2 Clang not built (run ./setup.sh llvm — only needed for C games)"
     fi
