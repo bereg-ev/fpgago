@@ -30,18 +30,24 @@ OBJS = $(SRCS:.c=.o)
 
 TARGET = labyrinth
 
+ifeq ($(OS),Windows_NT)
+  EXEEXT = .exe
+else
+  EXEEXT =
+endif
+
 .PHONY: all clean run
 
-all: $(TARGET)
+all: $(TARGET)$(EXEEXT)
 
-$(TARGET): $(OBJS)
+$(TARGET)$(EXEEXT): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-run: $(TARGET)
-	./$(TARGET) assets/map.txt
+run: $(TARGET)$(EXEEXT)
+	./$(TARGET)$(EXEEXT) assets/map.txt
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(TARGET) $(TARGET).exe
