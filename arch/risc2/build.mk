@@ -26,7 +26,7 @@ VPATH_DIRS   ?= . ../../engine
 
 vpath %.c $(VPATH_DIRS)
 
-BASE_CFLAGS = --target=risc2 -O1 -S -x c -fno-jump-tables \
+BASE_CFLAGS = --target=risc2 -O1 -S -x c -fno-jump-tables -ffreestanding \
               $(addprefix -I,$(INCLUDE_DIRS))
 ALL_CFLAGS  = $(BASE_CFLAGS) $(EXTRA_CFLAGS)
 
