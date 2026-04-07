@@ -39,6 +39,17 @@ FIX_FRAME = perl -0pe \
 GAME_ASM = $(notdir $(GAME_SRCS:.c=.asm))
 ALL_ASM  = $(ARCH_DIR)/startup.s $(ARCH_DIR)/runtime.s $(GAME_ASM)
 
+# ── Check for RISC2 Clang ──────────────────────────────────────────────────
+ifeq (,$(wildcard $(CLANG))$(wildcard $(CLANG).exe))
+  $(info )
+  $(info ERROR: RISC2 Clang not found at $(CLANG))
+  $(info )
+  $(info   RISC2 C games require a custom LLVM/Clang build.)
+  $(info   Run './setup.sh llvm' (Linux/macOS) or 'setup.bat llvm' (Windows) to build it.)
+  $(info )
+  $(error RISC2 Clang not found)
+endif
+
 # ── Build targets ───────────────────────────────────────────────────────────
 .PHONY: all clean install run-verilator run-fpga run-gtkwave
 
