@@ -133,18 +133,17 @@ function Invoke-Check {
     }
 
     Write-Info "RISC2 Clang"
+    $clangPath = ""
     $configMk = Join-Path $ScriptDir ".config.mk"
-    $clangExe = Join-Path $LlvmBuild "bin\clang.exe"
     if (Test-Path $configMk) {
         $clangLine = Select-String -Path $configMk -Pattern "^CLANG" | Select-Object -First 1
         if ($clangLine) {
             $clangPath = ($clangLine -replace '.*=\s*','').ToString().Trim()
-            if (Test-Path $clangPath) {
-                Write-Ok "RISC2 Clang at $clangPath"
-            } else {
-                Write-Fail "Configured in .config.mk but not found at $clangPath"
-            }
         }
+    }
+    $clangExe = Join-Path $LlvmBuild "bin\clang.exe"
+    if ($clangPath -and (Test-Path $clangPath)) {
+        Write-Ok "RISC2 Clang at $clangPath"
     } elseif (Test-Path $clangExe) {
         Write-Ok "RISC2 Clang at $clangExe"
     } else {
