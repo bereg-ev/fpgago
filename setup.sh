@@ -57,6 +57,32 @@ write_config_mk() {
     ok "Config written to .config.mk"
 }
 
+# ── Download helper (curl with wget fallback) ──────────────────────────────
+fetch() {
+    # fetch <url> [-o <file>]
+    if has curl; then
+        curl -fSL "$@"
+    elif has wget; then
+        # translate curl flags to wget
+        local url="" outfile=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -o) outfile="$2"; shift 2 ;;
+                -fSL|-fsSL|-fsS) shift ;;
+                *) url="$1"; shift ;;
+            esac
+        done
+        if [ -n "$outfile" ]; then
+            wget -q --show-progress -O "$outfile" "$url"
+        else
+            wget -qO- "$url"
+        fi
+    else
+        fail "Neither curl nor wget found. Install one and re-run."
+        exit 1
+    fi
+}
+
 # ── Tool check ──────────────────────────────────────────────────────────────
 has() { command -v "$1" >/dev/null 2>&1; }
 
@@ -147,7 +173,7 @@ install_oss_cad_suite() {
     esac
 
     # Fetch the latest release download URL from GitHub API
-    url=$(curl -fsSL "https://api.github.com/repos/YosysHQ/oss-cad-suite-build/releases/latest" \
+    url=$(fetch "https://api.github.com/repos/YosysHQ/oss-cad-suite-build/releases/latest" \
         | grep -o "\"browser_download_url\": *\"[^\"]*${os_tag}-${arch_tag}[^\"]*\"" \
         | head -1 | sed 's/.*"\(http[^"]*\)"/\1/')
 
@@ -159,7 +185,7 @@ install_oss_cad_suite() {
 
     tarball="$(mktemp)"
     info "Downloading $url ..."
-    curl -fSL "$url" -o "$tarball"
+    fetch "$url" -o "$tarball"
 
     info "Extracting to $OSS_CAD_DIR ..."
     mkdir -p "$SCRIPT_DIR"
@@ -194,19 +220,22 @@ do_install() {
             sudo apt-get install -y \
                 build-essential python3 libsdl2-dev \
                 verilator \
-                cmake ninja-build
+                cmake ninja-build \
+                curl git
             ;;
         fedora)
             sudo dnf install -y \
                 gcc gcc-c++ make python3 SDL2-devel \
                 verilator \
-                cmake ninja-build
+                cmake ninja-build \
+                curl git
             ;;
         arch)
             sudo pacman -S --needed \
                 gcc make python sdl2 \
                 verilator \
-                cmake ninja
+                cmake ninja \
+                curl git
             ;;
         windows)
             warn "Windows detected. Recommended: use WSL2 with Ubuntu, then re-run this script."
