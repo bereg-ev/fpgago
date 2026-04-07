@@ -28,7 +28,7 @@ PLATFORM_SRCS = \
 SRCS = $(ENGINE_SRCS) $(PLATFORM_SRCS)
 OBJS = $(SRCS:.c=.o)
 
-TARGET = wolf-clone
+TARGET = labyrinth
 
 .PHONY: all clean run
 

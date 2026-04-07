@@ -13,8 +13,8 @@
 #include "player.h"
 #include "map.h"
 
-#define SCREEN_W    128
-#define SCREEN_H    96
+#define SCREEN_W    480
+#define SCREEN_H    272
 
 /* FOV = 60 degrees = 341 angle units out of 2048 */
 #define FOV_ANGLES  341
@@ -22,9 +22,9 @@
 
 /*
  * Projection plane distance so a unit wall fills the screen at distance 1.
- * PROJ_DIST = (SCREEN_W/2) / tan(FOV/2) = 400 / tan(30°) ≈ 693
+ * PROJ_DIST = (SCREEN_W/2) / tan(FOV/2) = 240 / tan(30°) ≈ 416
  */
-#define PROJ_DIST   111
+#define PROJ_DIST   416
 
 #define COLOR_CEILING   0x00202028U   /* dark blue-grey ceiling */
 #define COLOR_FLOOR     0x00484840U   /* warm grey floor        */

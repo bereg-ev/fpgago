@@ -77,9 +77,9 @@ int main(int argc, char *argv[])
     }
 
     window = SDL_CreateWindow(
-        "Labyrinth (128x96)",
+        "Labyrinth (480x272)",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        SCREEN_W * 5, SCREEN_H * 5,
+        SCREEN_W * 2, SCREEN_H * 2,
         SDL_WINDOW_SHOWN
     );
     if (!window)
