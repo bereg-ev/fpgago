@@ -15,6 +15,10 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
+# arch.c includes user_archs.inc (managed by make copyarch/delarch)
+arch.o: arch.c user_archs.inc
+	$(CC) $(CFLAGS) -c $< -o $@
+
 # Compile source files to object files
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

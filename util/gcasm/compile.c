@@ -233,9 +233,17 @@ void setConstOperand(compile_t *d, line_t *line)
 void processConstOperand(compile_t *d, line_t *line, char *s)
 {
   unsigned int c;
-  int res = hex2bin(&s[1], &c);
+  int res;
 
-  TRY(s[0] != '#' || res < 0, "invalid constant: %s", s)
+  if (s[0] == '\'' && s[2] == '\'') {
+    /* Character literal: 'X' */
+    c = (unsigned int)(unsigned char)s[1];
+    res = 0;
+  } else {
+    res = hex2bin(&s[1], &c);
+  }
+
+  TRY((s[0] != '#' && s[0] != '\'') || res < 0, "invalid constant: %s", s)
   TRY(c > 255 && d->cpu.bits == 8, "constant is %s bigger than 8 bits", s)
   TRY(c > 65535 && d->cpu.bits == 16, "constant is %s bigger than 16 bits", s)
   line->binary &= ~(d->cpu.const_bitmask << d->cpu.const_bitshift);
@@ -299,7 +307,7 @@ void compileLine(compile_t *d, line_t *line, line_t *prev_line)
     {
       if ((d->mnemonic.flags & (FLAG_JUMP | FLAG_JUMP22)) == 0)      // cannot handle jumps here, but in pass 2 when we have all the labels
       {
-        if (line->words[1][0] == '#')
+        if (line->words[1][0] == '#' || line->words[1][0] == '\'')
           processConstOperand(d, line, line->words[1]);
         else
           processRegOperand(d, line, line->words[1], d->cpu.op2_bitshift);
@@ -310,7 +318,7 @@ void compileLine(compile_t *d, line_t *line, line_t *prev_line)
     {
       processRegOperand(d, line, line->words[1], d->cpu.op1_bitshift);
 
-      if (line->words[3][0] == '#')
+      if (line->words[3][0] == '#' || line->words[3][0] == '\'')
         processConstOperand(d, line, line->words[3]);
       else if (line->words[3][0] == '@')
       {

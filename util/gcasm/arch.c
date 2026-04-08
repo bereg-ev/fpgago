@@ -209,7 +209,7 @@ mnemonic_t risc3_mnemonics[] = {
 };
 
 cpu_t cpus[] = {
-  { "risc1", 4, risc1_mnemonics, sizeof(risc1_mnemonics) / sizeof(mnemonic_t),
+  { "risc1", "risc1", 4, risc1_mnemonics, sizeof(risc1_mnemonics) / sizeof(mnemonic_t),
     1,              // the Program Counter gets incremented by this
     16, 0x0f,       // 16 registers and bitmask for its 4 bit references
     9, 0,           // operand-1 and operand-2 bitshifts within the instruction word
@@ -220,7 +220,7 @@ cpu_t cpus[] = {
     8,               // 8-bit cpu
   },
 
-  { "risc2", 4, risc2_mnemonics, sizeof(risc2_mnemonics) / sizeof(mnemonic_t),
+  { "risc2", "risc2", 4, risc2_mnemonics, sizeof(risc2_mnemonics) / sizeof(mnemonic_t),
     4,              // the Program Counter gets incremented by this
     16, 0x0f,       // 16 registers and bitmask for its 4 bit references
     20, 16,         // operand-1 and operand-2 bitshifts within the instruction word
@@ -232,7 +232,7 @@ cpu_t cpus[] = {
   },
 
   /* RISC3 — 16-bit instructions, 16 registers, Z/C/N/V flags */
-  { "risc3", 4, risc3_mnemonics, sizeof(risc3_mnemonics) / sizeof(mnemonic_t),
+  { "risc3", "risc3", 4, risc3_mnemonics, sizeof(risc3_mnemonics) / sizeof(mnemonic_t),
     1,              // pcIncrease: pc counts in 16-bit halfword units (1 per instruction)
     16, 0x0f,       // 16 registers, 4-bit register field mask
     6, 2,           // op1_bitshift=6 (dst at [9:6]),  op2_bitshift=2 (src at [5:2])
@@ -241,7 +241,10 @@ cpu_t cpus[] = {
     6, 0x3f, 0,     // 6-bit immediate at [5:0]
     2,              // 16-bit instructions (2 bytes each)
     32,             // 32-bit registers
-  }
+  },
+
+  /* ── User-created architecture copies (managed by make copyarch/delarch) ── */
+#include "user_archs.inc"
 };
 
 /* RISC2 load displacement: passed from archBeforeProcessLine to archAfterProcessLine.
@@ -275,7 +278,7 @@ int archBeforeProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
   char *tmp;
 
   /* ── RISC1 ── */
-  if (!strcmp(cpu->name, "risc1") && !strcmp(words[0], "out"))
+  if (!strcmp(cpu->base_isa, "risc1") && !strcmp(words[0], "out"))
   {
     tmp = words[1];
     words[1] = words[3];
@@ -283,7 +286,7 @@ int archBeforeProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
   }
 
   /* ── RISC2 ── */
-  if (!strcmp(cpu->name, "risc2") && !strncmp(line->words[0], "store", 5))
+  if (!strcmp(cpu->base_isa, "risc2") && !strncmp(line->words[0], "store", 5))
   {
     tmp = words[1];
     words[1] = words[3];
@@ -291,7 +294,7 @@ int archBeforeProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
   }
 
   risc2_load_disp = 0xFFFFFFFF;
-  if (!strcmp(cpu->name, "risc2") && !strncmp(words[0], "load", 4) && line->wordNum >= 4)
+  if (!strcmp(cpu->base_isa, "risc2") && !strncmp(words[0], "load", 4) && line->wordNum >= 4)
   {
     char *plus = strchr(words[3], '+');
     if (plus != NULL && plus[1] == '#')
@@ -302,7 +305,7 @@ int archBeforeProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
   }
 
   /* ── RISC3 ── */
-  if (!strcmp(cpu->name, "risc3"))
+  if (!strcmp(cpu->base_isa, "risc3"))
   {
     risc3_mem_disp = 0;   /* default: zero displacement */
 
@@ -336,7 +339,7 @@ int archBeforeProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
 void archAfterProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t *line)
 {
   /* ── RISC2 ── */
-  if (!strcmp(cpu->name, "risc2"))
+  if (!strcmp(cpu->base_isa, "risc2"))
   {
     if (!strcmp(words[0], "imm"))
     {
@@ -357,7 +360,7 @@ void archAfterProcessLine(cpu_t *cpu, mnemonic_t mnemonic, char **words, line_t 
   }
 
   /* ── RISC3 ── */
-  if (!strcmp(cpu->name, "risc3"))
+  if (!strcmp(cpu->base_isa, "risc3"))
   {
     const char *mn = words[0];   /* mnemonic string as written by programmer */
 

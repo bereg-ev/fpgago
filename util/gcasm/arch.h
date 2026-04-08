@@ -19,6 +19,7 @@ typedef struct
 typedef struct cpu_t
 {
   char *name;
+  char *base_isa;         // base ISA name for arch hook dispatch (e.g. "risc1")
   int maxWordsInAsm;      // 4:  instruction + operand1 + comma + operand2
   mnemonic_t *mnemonics;
   int mnemonicNum;

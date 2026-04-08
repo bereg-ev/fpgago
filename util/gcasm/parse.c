@@ -120,7 +120,10 @@ void line2words(line_t *line, char *s)
 	  {
 	    c = *s++;
 
-      if (c >= 'A' && c <= 'Z')
+      if (c == '\'')
+        strMode = 1 - strMode;
+
+      if (c >= 'A' && c <= 'Z' && !strMode)
 		    c = c - 'A' + 'a';
 
       buf[bufp++] = c;
