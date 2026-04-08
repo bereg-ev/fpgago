@@ -43,7 +43,7 @@ VFLAGS = \
     -Wno-INITIALDLY \
     -Wno-UNSIGNED \
     -Wno-IMPLICIT \
-    -CFLAGS  "$(shell sdl2-config --cflags)" \
+    -CFLAGS  "$(shell sdl2-config --cflags) -DSIM_TITLE='\"$(or $(SIM_GAME),FPGAgo) — $(or $(SIM_ARCH),risc2) (ESC=quit)\"'" \
     -LDFLAGS "$(shell sdl2-config --libs)"
 
 # ── Verilog source list ──────────────────────────────────────────────────────

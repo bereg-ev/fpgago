@@ -184,8 +184,12 @@ int main(int argc, char** argv)
     }
     SDL_StartTextInput();   /* enable SDL_TEXTINPUT events so shift is respected */
 
+#ifndef SIM_TITLE
+#define SIM_TITLE "FPGAgo Simulation"
+#endif
+
     SDL_Window* window = SDL_CreateWindow(
-        "FPGA Game Console — Desktop Simulation  (ESC=quit)",
+        SIM_TITLE,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         LCD_W * WIN_SCALE, LCD_H * WIN_SCALE,
         0);

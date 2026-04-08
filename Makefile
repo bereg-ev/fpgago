@@ -14,10 +14,10 @@
 #   gtkwave   — iverilog simulation to VCD waveform
 #
 # Create & Manage:
-#   make newgame  GAME=<name> ARCH=<arch>                   — scaffold a new game
-#   make delgame  GAME=<name>                               — delete a user-created game
 #   make copyarch SRC=<arch> DST=<name>                     — copy an architecture
 #   make delarch  ARCH=<name>                               — delete a user-created arch
+#   make newgame  GAME=<name> ARCH=<arch>                   — scaffold a new game
+#   make delgame  GAME=<name>                               — delete a user-created game
 #
 # Setup:
 #   make check-deps                                         — check installed tools
@@ -66,10 +66,10 @@ help:
 	@printf "    gtkwave    Waveform simulation (iverilog)\n"
 	@printf "\n"
 	@printf "\033[32m  Create & Manage:\033[0m\n"
-	@printf "    make newgame  GAME=<name> ARCH=<arch>          Scaffold a new game\n"
-	@printf "    make delgame  GAME=<name>                      Delete a user-created game\n"
 	@printf "    make copyarch SRC=<arch> DST=<name>            Copy an architecture\n"
 	@printf "    make delarch  ARCH=<name>                      Delete a user-created arch\n"
+	@printf "    make newgame  GAME=<name> ARCH=<arch>          Scaffold a new game\n"
+	@printf "    make delgame  GAME=<name>                      Delete a user-created game\n"
 	@printf "\n"
 	@printf "\033[32m  Setup:\033[0m\n"
 	@printf "    make check-deps                                Check installed tools\n"
@@ -141,11 +141,11 @@ run: build
 	elif [ "$(TARGET)" = "verilator" ] || [ "$(TARGET)" = "fpga" ] || [ "$(TARGET)" = "gtkwave" ]; then \
 	    if [ "$(ARCH)" = "risc1" ]; then \
 	        $(MAKE) -C games/$(GAME) copy && \
-	        if [ "$(TARGET)" = "verilator" ]; then $(MAKE) -C arch/risc1/sim-desktop run; \
+	        if [ "$(TARGET)" = "verilator" ]; then $(MAKE) -C arch/risc1/sim-desktop run SIM_GAME=$(GAME) SIM_ARCH=$(ARCH); \
 	        elif [ "$(TARGET)" = "fpga" ]; then cd arch/risc1 && bash run.sh; \
 	        else cd arch/risc1 && bash simulate.sh; fi; \
 	    else \
-	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-$(TARGET); \
+	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-$(TARGET) SIM_GAME=$(GAME) SIM_ARCH=$(ARCH); \
 	    fi; \
 	else \
 	    echo "Error: specify TARGET=sdl2|verilator|fpga|gtkwave"; exit 1; \
@@ -164,6 +164,7 @@ clean:
 	done
 	@echo "Cleaning ROM artifacts..."
 	@rm -f arch/*/rom.bin arch/*/rom.hex arch/*/romL.vh arch/*/romH.vh arch/*/rom.vh
+	@rm -f rom.bin rom.hex romL.vh romH.vh romL2.vh romH2.vh
 	@echo "Cleaning gcasm..."
 	@$(MAKE) -C util/gcasm clean 2>/dev/null || true
 
@@ -173,7 +174,7 @@ copyarch:
 	@test -n "$(SRC)" -a -n "$(DST)" || { echo "Usage: make copyarch SRC=<arch> DST=<name>"; exit 1; }
 	@test -d arch/$(SRC) || { echo "Error: arch/$(SRC) not found"; exit 1; }
 	@test ! -d arch/$(DST) || { echo "Error: arch/$(DST) already exists"; exit 1; }
-	@case "$(DST)" in risc1|risc2|risc3) echo "Error: cannot overwrite built-in arch '$(DST)'"; exit 1;; esac
+	@case "$(DST)" in risc1|risc2) echo "Error: cannot overwrite built-in arch '$(DST)'"; exit 1;; esac
 	@echo "Copying arch/$(SRC) -> arch/$(DST)..."
 	@cp -R arch/$(SRC) arch/$(DST)
 	@# Determine base ISA: read from .user-arch if copying a user arch, else SRC is the base
@@ -184,13 +185,8 @@ copyarch:
 	fi; \
 	echo "$$base_isa" > arch/$(DST)/.user-arch; \
 	echo "  Base ISA: $$base_isa"; \
-	grep -q '"$(DST)"' util/gcasm/user_archs.inc 2>/dev/null || { \
-	    echo "  Registering $(DST) in gcasm..."; \
-	    sed -n "/\"$$base_isa\", \"$$base_isa\"/,/},/p" util/gcasm/arch.c \
-	        | sed "1s/\"$$base_isa\", \"$$base_isa\"/\"$(DST)\", \"$$base_isa\"/" \
-	        >> util/gcasm/user_archs.inc; \
-	    $(MAKE) -C util/gcasm clean && $(MAKE) -C util/gcasm; \
-	}
+	bash util/gcasm-copyarch.sh $(DST) $$base_isa $(SRC); \
+	$(MAKE) -C util/gcasm clean && $(MAKE) -C util/gcasm
 	@rm -f arch/$(DST)/rom.bin arch/$(DST)/rom.hex arch/$(DST)/romL.vh \
 	       arch/$(DST)/romH.vh arch/$(DST)/rom.vh arch/$(DST)/romL2.vh arch/$(DST)/romH2.vh
 	@rm -rf arch/$(DST)/sim-desktop/obj_dir
@@ -267,8 +263,13 @@ delarch:
 	@echo "Deleting arch/$(ARCH) and its platform dirs from other games..."
 	@find games -path "*/platform/$(ARCH)" -type d -exec rm -rf {} + 2>/dev/null || true
 	@rm -rf arch/$(ARCH)
-	@# Remove gcasm entry (full block from name line to next "},") and rebuild
-	@sed '/\"$(ARCH)\"/,/},/d' util/gcasm/user_archs.inc > util/gcasm/user_archs.inc.tmp && \
+	@# Remove gcasm mnemonic array + cpu_t entry and rebuild
+	@arch_id=$$(echo "$(ARCH)" | tr '-' '_'); \
+	sed "/^mnemonic_t $${arch_id}_mnemonics/,/^};/d" \
+	    util/gcasm/user_mnemonics.inc > util/gcasm/user_mnemonics.inc.tmp && \
+	    mv util/gcasm/user_mnemonics.inc.tmp util/gcasm/user_mnemonics.inc; \
+	sed "/\"$(ARCH)\"/,/},/d" \
+	    util/gcasm/user_archs.inc > util/gcasm/user_archs.inc.tmp && \
 	    mv util/gcasm/user_archs.inc.tmp util/gcasm/user_archs.inc
 	@$(MAKE) -C util/gcasm
 	@echo "Done."
@@ -297,7 +298,7 @@ newgame:
 	        mkdir -p games/$(GAME)/src/platform/$(ARCH); \
 	        bash util/gen-risc1-platform.sh $(ARCH) games/$(GAME)/src/platform/$(ARCH)/Makefile; \
 	    fi; \
-	elif [ "$$base_isa" = "risc2" ] || [ "$$base_isa" = "risc3" ]; then \
+	elif [ "$$base_isa" = "risc2" ]; then \
 	    echo "  Registering in GAMES_RISC2 and GAMES_SDL2..."; \
 	    sed -e 's/^GAMES_RISC2 = \(.*\)/GAMES_RISC2 = \1 $(GAME)/' \
 	        -e 's/^GAMES_SDL2  = \(.*\)/GAMES_SDL2  = \1 $(GAME)/' \

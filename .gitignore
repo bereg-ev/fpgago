@@ -60,5 +60,14 @@ llvm-project/
 llvm-risc2-build/
 oss-cad-suite/
 
+# ROM build artifacts (gcasm output)
+rom.bin
+rom.hex
+romL.vh
+romH.vh
+romL2.vh
+romH2.vh
+
 # User-created architectures
 util/gcasm/user_archs.inc
+util/gcasm/user_mnemonics.inc

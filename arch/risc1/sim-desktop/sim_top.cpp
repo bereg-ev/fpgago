@@ -110,8 +110,12 @@ int main(int argc, char** argv)
     }
     SDL_StartTextInput();
 
+#ifndef SIM_TITLE
+#define SIM_TITLE "FPGAgo Simulation"
+#endif
+
     SDL_Window* window = SDL_CreateWindow(
-        "RISC1 Snake — Desktop Simulation  (ESC=quit, WASD=move)",
+        SIM_TITLE,
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         LCD_W * WIN_SCALE, LCD_H * WIN_SCALE,
         0);
@@ -150,7 +154,7 @@ int main(int argc, char** argv)
     top->eval();
 
     fprintf(stderr,
-        "RISC1 Snake — desktop simulation started.\n"
+        SIM_TITLE " — started.\n"
         "LCD: %d x %d  window: %d x %d\n"
         "Controls: WASD = move, any key after game over = restart, ESC = quit\n",
         LCD_W, LCD_H, LCD_W * WIN_SCALE, LCD_H * WIN_SCALE);

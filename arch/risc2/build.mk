@@ -72,7 +72,7 @@ install: rom.bin
 
 # ── Architecture run targets ────────────────────────────────────────────────
 run-verilator: install
-	$(MAKE) -C $(ARCH_DIR)/sim-desktop run
+	$(MAKE) -C $(ARCH_DIR)/sim-desktop run SIM_GAME=$(SIM_GAME) SIM_ARCH=$(SIM_ARCH)
 
 run-fpga: install
 	cd $(ARCH_DIR) && bash run.sh

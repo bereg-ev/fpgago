@@ -40,7 +40,7 @@ clean:
 	rm -f rom.bin romL.vh romH.vh rom.hex
 
 run: copy
-	cd $(PROJECT)/sim-desktop && make run
+	cd $(PROJECT)/sim-desktop && make run SIM_GAME=GAMENAME SIM_ARCH=ARCHNAME
 
 .PHONY: all build copy clean run
 MKEOF
@@ -568,7 +568,7 @@ EOF
 case "$BASE" in
     risc1) gen_risc1 ;;
     risc2) gen_risc2 ;;
-    risc3) gen_risc2 ;;  # risc3 uses C template too
+    risc3) gen_risc2 ;;
     *)     echo "Error: unknown base ISA '$BASE'"; exit 1 ;;
 esac
 
