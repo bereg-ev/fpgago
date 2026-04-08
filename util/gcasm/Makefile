@@ -16,6 +16,12 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
 
 # arch.c includes user_mnemonics.inc and user_archs.inc (managed by make copyarch/delarch)
+user_mnemonics.inc:
+	@echo "/* User-created mnemonic tables — managed by make copyarch/delarch. */" > $@
+
+user_archs.inc:
+	@echo "/* User-created cpu_t entries — managed by make copyarch/delarch. */" > $@
+
 arch.o: arch.c user_mnemonics.inc user_archs.inc
 	$(CC) $(CFLAGS) -c $< -o $@
 
