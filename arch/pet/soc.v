@@ -314,6 +314,7 @@ module soc(
         end else begin
             dbg_cycle <= dbg_cycle + 1;
 
+
             // Count frames
             if (lcd_row == 0 && lcd_col == 0)
                 frame_count <= frame_count + 1;

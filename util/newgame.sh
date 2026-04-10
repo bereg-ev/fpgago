@@ -163,17 +163,29 @@ gen_risc2() {
 
 #ifdef RISC2_PLATFORM
 typedef unsigned int u32;
+typedef unsigned short u16;
 #else
 #include <stdint.h>
 typedef uint32_t u32;
+typedef uint16_t u16;
 #endif
 
+/* ── Character LCD (32x16 text) ──────────────────────────────────────── */
 #define LCD_COLS  32
 #define LCD_ROWS  16
 
 void hal_putc(int col, int row, int ch);
 void hal_clear(void);
 void hal_swap(void);
+
+/* ── Pixel framebuffer (480x272 RGB565) ──────────────────────────────── */
+#define SCREEN_W  480
+#define SCREEN_H  272
+
+#define RGB565(r,g,b) ((u16)(((r)<<11)|((g)<<5)|(b)))
+
+void lcd_set_pixel(int x, int y, u16 color);
+void lcd_present(void);
 
 #endif
 EOF
@@ -276,11 +288,17 @@ MKEOF
 #include "../../engine/game.h"
 #include "../../engine/render.h"
 
-/* ── GPU3D (background clear) ──────────────────────────────────────────── */
+/* ── GPU / framebuffer registers ───────────────────────────────────────── */
 #define GPU_REG(n)      (*(volatile unsigned int*)(0x0A0000 + (n)*4))
+#define FB_ROW          GPU_REG(0)
 #define GPU_CLR_COLOR   GPU_REG(7)
-#define GPU_CMD         GPU_REG(8)
-#define GPU_STATUS      GPU_REG(9)
+#define FB_CMD          GPU_REG(8)
+#define FB_STATUS       GPU_REG(9)
+#define FB_BUF(col)     (*(volatile unsigned int*)(0x200000 + (col)*4))
+
+#define CMD_FLUSH        1
+#define CMD_CLEAR_FB     2
+#define CMD_SWAP_BUFFERS 3
 
 /* ── LCD char control ──────────────────────────────────────────────────── */
 #define LCD_CTRL(n)     (*(volatile unsigned int*)(0x0C0000 + (n)))
@@ -291,11 +309,37 @@ MKEOF
 #define IO_UART_RX      (*(volatile unsigned int*)0xF0004)
 #define UART_RXRDY      (1 << 0)
 
-/* ── Back buffer ───────────────────────────────────────────────────────── */
+/* ── Char LCD back buffer ─────────────────────────────────────────────── */
 #define BUF_BASE        ((volatile unsigned int*)0x010100)
 static volatile unsigned int *buf = BUF_BASE;
 
-/* ── HAL ───────────────────────────────────────────────────────────────── */
+/* ── Helpers ───────────────────────────────────────────────────────────── */
+
+static void fb_wait(void)  { while (FB_STATUS & 1) {} }
+
+static void gpu_clear_black(void)
+{
+    fb_wait(); GPU_CLR_COLOR = 0; FB_CMD = CMD_CLEAR_FB;
+    fb_wait(); FB_CMD = CMD_SWAP_BUFFERS;
+    fb_wait(); GPU_CLR_COLOR = 0; FB_CMD = CMD_CLEAR_FB;
+    fb_wait(); FB_CMD = CMD_SWAP_BUFFERS;
+}
+
+static void lcd_char_init(void)
+{
+    LCD_CTRL(0) = 0;
+    LCD_CTRL(1) = 0;
+    LCD_CTRL(2) = LCD_COLS;
+    LCD_CTRL(3) = 0x8000 | LCD_ROWS;
+}
+
+static int uart_getchar(void)
+{
+    while (!(IO_STATUS & UART_RXRDY)) {}
+    return (int)(IO_UART_RX & 0xFF);
+}
+
+/* ── HAL: character LCD ────────────────────────────────────────────────── */
 
 void hal_putc(int col, int row, int ch)
 {
@@ -317,28 +361,39 @@ void hal_swap(void)
         LCD_TEXT(i) = buf[i];
 }
 
-/* ── Helpers ───────────────────────────────────────────────────────────── */
+/* ── HAL: pixel framebuffer ────────────────────────────────────────────── */
 
-static void gpu_wait(void)  { while (GPU_STATUS & 1) {} }
+static int pixel_cur_row = -1;
 
-static void gpu_clear_black(void)
+void lcd_set_pixel(int x, int y, u16 color)
 {
-    gpu_wait(); GPU_CLR_COLOR = 0; GPU_CMD = 2; gpu_wait(); GPU_CMD = 3;
-    gpu_wait(); GPU_CLR_COLOR = 0; GPU_CMD = 2; gpu_wait(); GPU_CMD = 3;
+    if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) return;
+
+    /* Flush previous row if we moved to a new one */
+    if (y != pixel_cur_row) {
+        if (pixel_cur_row >= 0) {
+            fb_wait();
+            FB_ROW = pixel_cur_row;
+            FB_CMD = CMD_FLUSH;
+        }
+        pixel_cur_row = y;
+    }
+
+    FB_BUF(x) = (unsigned int)color;
 }
 
-static void lcd_char_init(void)
+void lcd_present(void)
 {
-    LCD_CTRL(0) = 0;
-    LCD_CTRL(1) = 0;
-    LCD_CTRL(2) = LCD_COLS;
-    LCD_CTRL(3) = 0x8000 | LCD_ROWS;
-}
-
-static int uart_getchar(void)
-{
-    while (!(IO_STATUS & UART_RXRDY)) {}
-    return (int)(IO_UART_RX & 0xFF);
+    /* Flush last pending row */
+    if (pixel_cur_row >= 0) {
+        fb_wait();
+        FB_ROW = pixel_cur_row;
+        FB_CMD = CMD_FLUSH;
+        pixel_cur_row = -1;
+    }
+    /* Swap front/back buffers */
+    fb_wait();
+    FB_CMD = CMD_SWAP_BUFFERS;
 }
 
 /* ── Game state in data RAM ────────────────────────────────────────────── */
@@ -415,7 +470,7 @@ MKEOF
     # ── platform/sdl2/main.c ──
     cat > "$GDIR/src/platform/sdl2/main.c" << 'EOF'
 /*
- * platform/sdl2/main.c — SDL2 char LCD simulator
+ * platform/sdl2/main.c — SDL2 platform (char LCD + pixel framebuffer)
  */
 
 #include <SDL.h>
@@ -426,24 +481,46 @@ MKEOF
 #include "../../engine/render.h"
 #include "../../engine/font.h"
 
+/* ── Char LCD rendering constants ──────────────────────────────────────── */
 #define CHAR_W   8
 #define CHAR_H  16
 #define FONT_W   5
 #define GLYPH_H  7
 
-#define FB_W    (LCD_COLS * CHAR_W)
-#define FB_H    (LCD_ROWS * CHAR_H)
-
 static char s_chars[LCD_ROWS][LCD_COLS];
+
+/* ── SDL state ─────────────────────────────────────────────────────────── */
 static SDL_Window   *s_window   = NULL;
 static SDL_Renderer *s_renderer = NULL;
-static SDL_Texture  *s_texture  = NULL;
-static uint32_t      s_fb[FB_W * FB_H];
+
+/* Pixel framebuffer (480x272 ARGB8888 for SDL) */
+static SDL_Texture  *s_pixel_tex = NULL;
+static uint32_t      s_pixels[SCREEN_W * SCREEN_H];
+static int           s_pixel_dirty = 0;
+
+/* Char LCD framebuffer */
+static SDL_Texture  *s_char_tex  = NULL;
+static uint32_t      s_char_fb[(LCD_COLS * CHAR_W) * (LCD_ROWS * CHAR_H)];
+
+#define CHAR_FB_W (LCD_COLS * CHAR_W)
+#define CHAR_FB_H (LCD_ROWS * CHAR_H)
 
 #define COL_BG  0xFF001800
 #define COL_FG  0xFF00CC00
 
-/* ── HAL ───────────────────────────────────────────────────────────────── */
+/* ── RGB565 to ARGB8888 ───────────────────────────────────────────────── */
+static uint32_t rgb565_to_argb(u16 c)
+{
+    uint32_t r = (c >> 11) & 0x1F;
+    uint32_t g = (c >> 5)  & 0x3F;
+    uint32_t b = c & 0x1F;
+    r = (r << 3) | (r >> 2);
+    g = (g << 2) | (g >> 4);
+    b = (b << 3) | (b >> 2);
+    return 0xFF000000 | (r << 16) | (g << 8) | b;
+}
+
+/* ── HAL: character LCD ────────────────────────────────────────────────── */
 
 void hal_putc(int col, int row, int ch)
 {
@@ -471,19 +548,38 @@ void hal_swap(void)
 
             for (fr = 0; fr < CHAR_H; fr++)
                 for (fc = 0; fc < CHAR_W; fc++)
-                    s_fb[(py + fr) * FB_W + (px + fc)] = COL_BG;
+                    s_char_fb[(py + fr) * CHAR_FB_W + (px + fc)] = COL_BG;
 
             if (glyph) {
                 for (fr = 0; fr < GLYPH_H; fr++)
                     for (fc = 0; fc < FONT_W; fc++)
                         if (glyph[fr] & (0x10 >> fc))
-                            s_fb[(py + 4 + fr) * FB_W + (px + 1 + fc)] = COL_FG;
+                            s_char_fb[(py + 4 + fr) * CHAR_FB_W + (px + 1 + fc)] = COL_FG;
             }
         }
     }
-    SDL_UpdateTexture(s_texture, NULL, s_fb, FB_W * (int)sizeof(uint32_t));
-    SDL_RenderCopy(s_renderer, s_texture, NULL, NULL);
+    SDL_UpdateTexture(s_char_tex, NULL, s_char_fb, CHAR_FB_W * (int)sizeof(uint32_t));
+    SDL_RenderCopy(s_renderer, s_char_tex, NULL, NULL);
     SDL_RenderPresent(s_renderer);
+}
+
+/* ── HAL: pixel framebuffer ────────────────────────────────────────────── */
+
+void lcd_set_pixel(int x, int y, u16 color)
+{
+    if (x >= 0 && x < SCREEN_W && y >= 0 && y < SCREEN_H) {
+        s_pixels[y * SCREEN_W + x] = rgb565_to_argb(color);
+        s_pixel_dirty = 1;
+    }
+}
+
+void lcd_present(void)
+{
+    if (!s_pixel_dirty) return;
+    SDL_UpdateTexture(s_pixel_tex, NULL, s_pixels, SCREEN_W * (int)sizeof(uint32_t));
+    SDL_RenderCopy(s_renderer, s_pixel_tex, NULL, NULL);
+    SDL_RenderPresent(s_renderer);
+    s_pixel_dirty = 0;
 }
 
 /* ── Main ──────────────────────────────────────────────────────────────── */
@@ -503,7 +599,7 @@ int main(int argc, char *argv[])
     s_window = SDL_CreateWindow(
         "GAMENAME",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        FB_W * 2, FB_H * 2,
+        SCREEN_W * 2, SCREEN_H * 2,
         SDL_WINDOW_SHOWN
     );
     if (!s_window) { SDL_Log("Window: %s", SDL_GetError()); SDL_Quit(); return 1; }
@@ -511,12 +607,15 @@ int main(int argc, char *argv[])
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!s_renderer) s_renderer = SDL_CreateRenderer(s_window, -1, SDL_RENDERER_SOFTWARE);
-    if (s_renderer) SDL_RenderSetLogicalSize(s_renderer, FB_W, FB_H);
+    if (s_renderer) SDL_RenderSetLogicalSize(s_renderer, SCREEN_W, SCREEN_H);
     if (!s_renderer) { SDL_Log("Renderer: %s", SDL_GetError()); SDL_DestroyWindow(s_window); SDL_Quit(); return 1; }
 
-    s_texture = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
-                                  SDL_TEXTUREACCESS_STREAMING, FB_W, FB_H);
-    if (!s_texture) { SDL_DestroyRenderer(s_renderer); SDL_DestroyWindow(s_window); SDL_Quit(); return 1; }
+    s_pixel_tex = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
+                                    SDL_TEXTUREACCESS_STREAMING, SCREEN_W, SCREEN_H);
+    s_char_tex  = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
+                                    SDL_TEXTUREACCESS_STREAMING, CHAR_FB_W, CHAR_FB_H);
+
+    memset(s_pixels, 0, sizeof(s_pixels));
 
     game_init(&g);
     render_frame(&g);
@@ -551,7 +650,8 @@ int main(int argc, char *argv[])
         SDL_Delay(16);
     }
 
-    SDL_DestroyTexture(s_texture);
+    SDL_DestroyTexture(s_pixel_tex);
+    SDL_DestroyTexture(s_char_tex);
     SDL_DestroyRenderer(s_renderer);
     SDL_DestroyWindow(s_window);
     SDL_Quit();
