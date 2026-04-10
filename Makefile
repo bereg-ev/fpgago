@@ -19,6 +19,11 @@
 #   make newgame  GAME=<name> ARCH=<arch>                   — scaffold a new game
 #   make delgame  GAME=<name>                               — delete a user-created game
 #
+# Retro Computers:
+#   make download-spectrum-rom                              — download ZX Spectrum ROM
+#   make download-tv80                                      — download TV80 Z80 CPU core
+#   make run-spectrum                                       — run ZX Spectrum simulation
+#
 # Setup:
 #   make check-deps                                         — check installed tools
 #
@@ -45,7 +50,7 @@ GAMES_RISC1 = char-snake
 GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels
 GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess hello-pixels
 
-.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 all-pet gcasm check-deps copyarch delarch newgame delgame download-pet-roms download-pet-game run-pet-game list-pet-games
+.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 all-pet gcasm check-deps copyarch delarch newgame delgame download-pet-roms download-pet-game run-pet-game list-pet-games download-spectrum-rom download-tv80 run-spectrum
 
 # ── Default target: show help ──────────────────────────────────────────────
 help:
@@ -71,6 +76,10 @@ help:
 	@printf "    make newgame  GAME=<name> ARCH=<arch>          Scaffold a new game\n"
 	@printf "    make delgame  GAME=<name>                      Delete a user-created game\n"
 	@printf "\n"
+	@printf "\033[32m  Retro Computers:\033[0m\n"
+	@printf "    make download-spectrum-rom                      Download ZX Spectrum ROM\n"
+	@printf "    make download-tv80                              Download TV80 Z80 CPU core\n"
+	@printf "    make run-spectrum                               Run ZX Spectrum simulation\n"
 	@printf "\033[32m  Commodore PET:\033[0m\n"
 	@printf "    make download-pet-roms                         Download PET firmware ROMs\n"
 	@printf "    make download-pet-game GAME=<name>             Download a PET game\n"
@@ -359,3 +368,13 @@ delgame:
 	     -e 's/ $(GAME) / /g' \
 	     Makefile > Makefile.tmp && mv Makefile.tmp Makefile
 	@echo "Done."
+
+# ── ZX Spectrum ────────────────────────────────────────────────────────────
+download-tv80:
+	@$(MAKE) -C arch/spectrum/sim-desktop download-tv80
+
+download-spectrum-rom:
+	@$(MAKE) -C arch/spectrum/sim-desktop download-spectrum-rom
+
+run-spectrum:
+	@$(MAKE) -C arch/spectrum/sim-desktop run
