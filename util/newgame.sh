@@ -281,20 +281,19 @@ MKEOF
     # ── platform/risc2/main.c ──
     cat > "$GDIR/src/platform/risc2/main.c" << 'EOF'
 /*
- * platform/risc2/main.c — RISC2 char LCD platform layer
+ * platform/risc2/main.c — RISC2 platform layer (char LCD + pixel framebuffer)
  */
 
 #include "../../hal/hal.h"
 #include "../../engine/game.h"
 #include "../../engine/render.h"
 
-/* ── GPU / framebuffer registers ───────────────────────────────────────── */
-#define GPU_REG(n)      (*(volatile unsigned int*)(0x0A0000 + (n)*4))
-#define FB_ROW          GPU_REG(0)
-#define GPU_CLR_COLOR   GPU_REG(7)
-#define FB_CMD          GPU_REG(8)
-#define FB_STATUS       GPU_REG(9)
-#define FB_BUF(col)     (*(volatile unsigned int*)(0x200000 + (col)*4))
+/* ── dcache framebuffer interface ──────────────────────────────────────── */
+#define FB_BUF(c)       (*(volatile unsigned int*)(0x200000 + (c)*4))
+#define FB_ROW          (*(volatile unsigned int*)0x0A0000)
+#define FB_CLR_COLOR    (*(volatile unsigned int*)0x0A001C)
+#define FB_CMD          (*(volatile unsigned int*)0x0A0020)
+#define FB_STATUS       (*(volatile unsigned int*)0x0A0024)
 
 #define CMD_FLUSH        1
 #define CMD_CLEAR_FB     2
@@ -309,21 +308,9 @@ MKEOF
 #define IO_UART_RX      (*(volatile unsigned int*)0xF0004)
 #define UART_RXRDY      (1 << 0)
 
-/* ── Char LCD back buffer ─────────────────────────────────────────────── */
-#define BUF_BASE        ((volatile unsigned int*)0x010100)
-static volatile unsigned int *buf = BUF_BASE;
-
 /* ── Helpers ───────────────────────────────────────────────────────────── */
 
 static void fb_wait(void)  { while (FB_STATUS & 1) {} }
-
-static void gpu_clear_black(void)
-{
-    fb_wait(); GPU_CLR_COLOR = 0; FB_CMD = CMD_CLEAR_FB;
-    fb_wait(); FB_CMD = CMD_SWAP_BUFFERS;
-    fb_wait(); GPU_CLR_COLOR = 0; FB_CMD = CMD_CLEAR_FB;
-    fb_wait(); FB_CMD = CMD_SWAP_BUFFERS;
-}
 
 static void lcd_char_init(void)
 {
@@ -341,42 +328,52 @@ static int uart_getchar(void)
 
 /* ── HAL: character LCD ────────────────────────────────────────────────── */
 
+/* Char LCD back buffer placed above the FB_BUF corruption zone (word 480+) */
+#define CHAR_BUF  ((volatile unsigned int*)0x010780)
+
 void hal_putc(int col, int row, int ch)
 {
     if (col >= 0 && col < LCD_COLS && row >= 0 && row < LCD_ROWS)
-        buf[row * LCD_COLS + col] = (unsigned int)ch;
+        CHAR_BUF[row * LCD_COLS + col] = (unsigned int)ch;
 }
 
 void hal_clear(void)
 {
     int i, n = LCD_COLS * LCD_ROWS;
     for (i = 0; i < n; i++)
-        buf[i] = ' ';
+        CHAR_BUF[i] = ' ';
 }
 
 void hal_swap(void)
 {
     int i, n = LCD_COLS * LCD_ROWS;
     for (i = 0; i < n; i++)
-        LCD_TEXT(i) = buf[i];
+        LCD_TEXT(i) = CHAR_BUF[i];
 }
 
 /* ── HAL: pixel framebuffer ────────────────────────────────────────────── */
 
-static int pixel_cur_row = -1;
+/* Track current row in a fixed RAM location (no static globals on RISC2) */
+#define PIXEL_CUR_ROW  (*(volatile int*)0x010A00)
 
 void lcd_set_pixel(int x, int y, u16 color)
 {
+    int cur;
     if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) return;
 
+    /* Disable char LCD overlay */
+    LCD_CTRL(3) = 0;
+
     /* Flush previous row if we moved to a new one */
-    if (y != pixel_cur_row) {
-        if (pixel_cur_row >= 0) {
+    cur = PIXEL_CUR_ROW;
+    if (y != cur) {
+        if (cur >= 0) {
             fb_wait();
-            FB_ROW = pixel_cur_row;
+            FB_ROW = cur;
             FB_CMD = CMD_FLUSH;
+            fb_wait();
         }
-        pixel_cur_row = y;
+        PIXEL_CUR_ROW = y;
     }
 
     FB_BUF(x) = (unsigned int)color;
@@ -384,12 +381,14 @@ void lcd_set_pixel(int x, int y, u16 color)
 
 void lcd_present(void)
 {
+    int cur = PIXEL_CUR_ROW;
     /* Flush last pending row */
-    if (pixel_cur_row >= 0) {
+    if (cur >= 0) {
         fb_wait();
-        FB_ROW = pixel_cur_row;
+        FB_ROW = cur;
         FB_CMD = CMD_FLUSH;
-        pixel_cur_row = -1;
+        fb_wait();
+        PIXEL_CUR_ROW = -1;
     }
     /* Swap front/back buffers */
     fb_wait();
@@ -397,7 +396,7 @@ void lcd_present(void)
 }
 
 /* ── Game state in data RAM ────────────────────────────────────────────── */
-#define GAME_PTR  ((game_t*)0x010900)
+#define GAME_PTR  ((game_t*)0x010B00)
 
 /* ── Main ──────────────────────────────────────────────────────────────── */
 
@@ -405,7 +404,7 @@ int main(void)
 {
     game_t *g = GAME_PTR;
 
-    gpu_clear_black();
+    PIXEL_CUR_ROW = -1;
     lcd_char_init();
 
     game_init(g);
@@ -496,7 +495,7 @@ static SDL_Renderer *s_renderer = NULL;
 /* Pixel framebuffer (480x272 ARGB8888 for SDL) */
 static SDL_Texture  *s_pixel_tex = NULL;
 static uint32_t      s_pixels[SCREEN_W * SCREEN_H];
-static int           s_pixel_dirty = 0;
+static int           s_pixel_mode = 0;  /* switches to 1 on first lcd_set_pixel */
 
 /* Char LCD framebuffer */
 static SDL_Texture  *s_char_tex  = NULL;
@@ -535,6 +534,16 @@ void hal_clear(void)
 
 void hal_swap(void)
 {
+    if (s_pixel_mode) {
+        /* Pixel mode: present the pixel framebuffer */
+        SDL_UpdateTexture(s_pixel_tex, NULL, s_pixels, SCREEN_W * (int)sizeof(uint32_t));
+        SDL_RenderClear(s_renderer);
+        SDL_RenderCopy(s_renderer, s_pixel_tex, NULL, NULL);
+        SDL_RenderPresent(s_renderer);
+        return;
+    }
+
+    /* Char LCD mode */
     int r, c, fr, fc;
     for (r = 0; r < LCD_ROWS; r++) {
         for (c = 0; c < LCD_COLS; c++) {
@@ -569,17 +578,17 @@ void lcd_set_pixel(int x, int y, u16 color)
 {
     if (x >= 0 && x < SCREEN_W && y >= 0 && y < SCREEN_H) {
         s_pixels[y * SCREEN_W + x] = rgb565_to_argb(color);
-        s_pixel_dirty = 1;
+        s_pixel_mode = 1;
     }
 }
 
 void lcd_present(void)
 {
-    if (!s_pixel_dirty) return;
+    s_pixel_mode = 1;
     SDL_UpdateTexture(s_pixel_tex, NULL, s_pixels, SCREEN_W * (int)sizeof(uint32_t));
+    SDL_RenderClear(s_renderer);
     SDL_RenderCopy(s_renderer, s_pixel_tex, NULL, NULL);
     SDL_RenderPresent(s_renderer);
-    s_pixel_dirty = 0;
 }
 
 /* ── Main ──────────────────────────────────────────────────────────────── */

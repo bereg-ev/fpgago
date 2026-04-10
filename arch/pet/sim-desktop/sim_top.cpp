@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 #include <queue>
+#include <vector>
 
 #include "verilated.h"
 #include "Vsoc.h"
@@ -131,12 +132,66 @@ static void uart_print(Vsoc* top)
     prev_tx = cur_tx;
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ * 4.  Auto-typer: feed a file to UART after boot
+ *
+ * If AUTOTYPE_FILE is defined at compile time, the file is read into
+ * memory and its bytes are injected into the UART queue after a boot
+ * delay.  For .prg games, this is just "RUN\r".  For .bas programs,
+ * it's the entire source plus "RUN\r".
+ * ══════════════════════════════════════════════════════════════════════ */
+static std::vector<uint8_t> autotype_data;
+static size_t autotype_pos = 0;
+static int    autotype_delay = 0;     /* frames to wait before next char  */
+
+static void autotype_load(const char* path)
+{
+    FILE* f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "autotype: cannot open %s\n", path); return; }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    autotype_data.resize((size_t)sz);
+    fread(autotype_data.data(), 1, (size_t)sz, f);
+    fclose(f);
+    autotype_delay = 30;       /* wait 30 frames (~0.5 s) for BASIC to boot */
+    autotype_pos = 0;
+    fprintf(stderr, "autotype: loaded %ld bytes from %s\n", sz, path);
+}
+
+/* Called once per frame.  Pushes ONE character into the UART queue,
+ * then waits a few frames so the PET KERNAL's keyboard scan can
+ * detect the key press, see it released, and be ready for the next.
+ * After RETURN, waits longer for the PET to tokenize the line.      */
+static void autotype_tick()
+{
+    if (autotype_data.empty() || autotype_pos >= autotype_data.size())
+        return;
+
+    if (autotype_delay > 0) { autotype_delay--; return; }
+
+    uint8_t ch = autotype_data[autotype_pos++];
+    uart_queue.push(ch);
+
+    if (ch == 0x0Du)
+        autotype_delay = 15;   /* wait 15 frames after RETURN (line processing) */
+    else
+        autotype_delay = 2;    /* wait 2 frames between characters */
+}
+
 /* ── main ──────────────────────────────────────────────────────────── */
 int main(int argc, char** argv)
 {
     VerilatedContext* ctx = new VerilatedContext;
     ctx->commandArgs(argc, argv);
     Vsoc* top = new Vsoc{ctx};
+
+    /* Check for --autotype <file> argument */
+    for (int i = 1; i < argc; i++)
+    {
+        if (strcmp(argv[i], "--autotype") == 0 && i + 1 < argc)
+            autotype_load(argv[++i]);
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
@@ -223,6 +278,9 @@ int main(int argc, char** argv)
             SDL_RenderCopy(renderer, texture, NULL, NULL);
             SDL_RenderPresent(renderer);
             pixel_idx = 0;
+
+            /* Auto-typer: feed one line per frame after boot */
+            autotype_tick();
 
             SDL_Event ev;
             while (SDL_PollEvent(&ev))

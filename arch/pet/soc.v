@@ -77,9 +77,54 @@ module soc(
     // ================================================================
     reg [7:0] main_ram [0:32767];
 
+    // ── Game PRG loader: copy game data into RAM after BASIC boots ──
+    // The game ROM is loaded at init but held in a shadow array.
+    // After BASIC finishes cold start (detected by frame count), the
+    // data is bulk-copied into main_ram at hardware speed.  This
+    // avoids corruption from BASIC's NEW/CLR during boot.
+`ifdef GAME_PRG
+    // Game PRG loader: shadow ROM + triggered bulk copy.
+    // The auto-typer sends "poke59632,1\r" which writes to $E8F0,
+    // triggering a hardware-speed copy from game_rom into main_ram.
+    // CPU writes are never blocked.
+    reg [7:0] game_rom [0:32767];
+    initial $readmemh("../roms/game.hex", game_rom);
+`include "../roms/game_params.vh"
+
+    reg        game_copying;
+    reg        game_loaded;
+    reg [14:0] game_copy_addr;
+    wire       sel_gameload = sel_io & (cpu_ab[7:0] == 8'hF0); // $E8F0
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            game_copying   <= 0;
+            game_loaded    <= 0;
+            game_copy_addr <= GAME_START;
+        end else begin
+            // Trigger: CPU writes to $E8F0
+            if (cpu_write && sel_gameload && !game_loaded)
+                game_copying <= 1;
+
+            // Bulk copy: exact game range only, 1 byte/clock
+            if (game_copying && !game_loaded) begin
+                main_ram[game_copy_addr] <= game_rom[game_copy_addr];
+                if (game_copy_addr == GAME_END) begin
+                    game_loaded  <= 1;
+                    game_copying <= 0;
+                end else
+                    game_copy_addr <= game_copy_addr + 1;
+            end
+
+            // Normal CPU writes (always active — last NB assignment wins)
+            if (cpu_write && sel_ram)
+                main_ram[cpu_ab[14:0]] <= cpu_do;
+        end
+`else
     always @(posedge clk)
         if (cpu_write & sel_ram)
             main_ram[cpu_ab[14:0]] <= cpu_do;
+`endif
 
     // ================================================================
     //  Screen RAM — 1KB ($8000-$83FF), dual-read: CPU + video
@@ -298,26 +343,29 @@ module soc(
             cpu_di <= cpu_di_comb;
 
     // ================================================================
-    //  Debug: UART TX output of CPU PC (optional)
+    //  Frame counter (used by game loader and debug)
+    // ================================================================
+    reg [31:0] frame_count;
+    always @(posedge clk or negedge rst)
+        if (!rst)
+            frame_count <= 0;
+        else if (lcd_row == 0 && lcd_col == 0)
+            frame_count <= frame_count + 1;
+
+    // ================================================================
+    //  Debug / unused signal init
     // ================================================================
 `ifdef SIMULATION
     reg [31:0] dbg_cycle;
-    reg [31:0] frame_count;
     always @(posedge clk or negedge rst)
         if (!rst) begin
             dbg_cycle <= 0;
-            frame_count <= 0;
             txen <= 0;
             txdata <= 0;
             led1 <= 0;
             led2 <= 0;
         end else begin
             dbg_cycle <= dbg_cycle + 1;
-
-
-            // Count frames
-            if (lcd_row == 0 && lcd_col == 0)
-                frame_count <= frame_count + 1;
         end
 `else
     always @(posedge clk or negedge rst)

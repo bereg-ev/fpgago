@@ -72,5 +72,9 @@ romH2.vh
 util/gcasm/user_archs.inc
 util/gcasm/user_mnemonics.inc
 
-# PET ROM binary dumps (downloaded, not committed)
+# PET ROM binary dumps and game files (downloaded, not committed)
 arch/pet/roms/*.bin
+arch/pet/roms/games/
+arch/pet/roms/game.hex
+arch/pet/roms/game.uart
+arch/pet/roms/autorun.uart

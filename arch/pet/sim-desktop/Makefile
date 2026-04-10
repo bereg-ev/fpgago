@@ -16,6 +16,28 @@ ROM_KERNAL  = kernal-2.901465-03.bin
 ROM_EDITOR  = edit-2-n.901447-24.bin
 ROM_CHARGEN = characters-2.901447-10.bin
 
+# ── Game catalog ────────────────────────────────────────────────────────────
+# Each game: NAME = url|format|description
+# format: prg (binary, loaded into RAM) or bas (text, auto-typed via UART)
+GAMES_PRG_BASE = https://www.zimmers.net/anonftp/pub/cbm/pet/games/english
+GAMES_BAS_BASE = https://raw.githubusercontent.com/GReaperEx/bcg/master
+
+GAME_blackjack   = $(GAMES_PRG_BASE)/blackjack.prg|prg|Blackjack card game
+GAME_startrek    = $(GAMES_PRG_BASE)/startrek.prg|prg|Star Trek space combat
+GAME_supertrek   = $(GAMES_PRG_BASE)/super_trek.prg|prg|Super Trek strategy game
+GAME_adventure   = $(GAMES_PRG_BASE)/adventure-2.prg|prg|Text adventure game
+GAME_breakout    = $(GAMES_PRG_BASE)/breakout.prg|prg|Breakout arcade game
+GAME_canyon      = $(GAMES_PRG_BASE)/canyon.prg|prg|Canyon bomber
+GAME_checkers    = $(GAMES_PRG_BASE)/checkers.prg|prg|Checkers board game
+GAME_dungeon     = $(GAMES_PRG_BASE)/dungeon.prg|prg|Dungeon crawler
+GAME_hangman     = $(GAMES_PRG_BASE)/hangman1.prg|prg|Hangman word game
+GAME_guess       = $(GAMES_BAS_BASE)/guess.bas|bas|Number guessing game
+GAME_lunar       = $(GAMES_BAS_BASE)/lunar.bas|bas|Lunar lander simulation
+GAME_hammurabi   = $(GAMES_BAS_BASE)/hammurabi.bas|bas|Kingdom management
+GAME_tictactoe   = $(GAMES_BAS_BASE)/tictactoe1.bas|bas|Tic-tac-toe
+GAME_nim         = $(GAMES_BAS_BASE)/nim.bas|bas|Nim mathematical game
+GAME_poker       = $(GAMES_BAS_BASE)/poker.bas|bas|Poker card game
+
 # ── Verilator flags ─────────────────────────────────────────────────────────
 VFLAGS = \
     --cc \
@@ -58,7 +80,7 @@ VSRCS = \
     $(PERI)/lcd_out.v
 
 # ── Targets ──────────────────────────────────────────────────────────────────
-.PHONY: all run clean download-pet-roms
+.PHONY: all run clean download-pet-roms download-pet-game run-pet-game list-pet-games
 
 all:
 	@if [ ! -f $(ROMS)/basic.hex ] || [ ! -f $(ROMS)/kernal.hex ] || [ ! -f $(ROMS)/chargen.hex ]; then \
@@ -76,7 +98,104 @@ run: all
 	./obj_dir/Vsoc
 
 clean:
-	rm -rf obj_dir
+	rm -rf obj_dir $(ROMS)/game.hex $(ROMS)/game.uart $(ROMS)/games
+
+# ── List available games ─────────────────────────────────────────────────────
+list-pet-games:
+	@echo ""
+	@echo "  Available PET games:"
+	@echo ""
+	@echo "  PRG games (from zimmers.net — binary, pre-loaded into RAM):"
+	@echo "    blackjack    Blackjack card game"
+	@echo "    startrek     Star Trek space combat"
+	@echo "    supertrek    Super Trek strategy game"
+	@echo "    adventure    Text adventure game"
+	@echo "    breakout     Breakout arcade game"
+	@echo "    canyon       Canyon bomber"
+	@echo "    checkers     Checkers board game"
+	@echo "    dungeon      Dungeon crawler"
+	@echo "    hangman      Hangman word game"
+	@echo ""
+	@echo "  BAS games (from github.com/GReaperEx/bcg — BASIC source, auto-typed):"
+	@echo "    guess        Number guessing game"
+	@echo "    lunar        Lunar lander simulation"
+	@echo "    hammurabi    Kingdom management"
+	@echo "    tictactoe    Tic-tac-toe"
+	@echo "    nim          Nim mathematical game"
+	@echo "    poker        Poker card game"
+	@echo ""
+	@echo "  Usage:"
+	@echo "    make download-pet-game GAME=<name>"
+	@echo "    make run-pet-game GAME=<name>"
+	@echo ""
+
+# ── Download a specific game ─────────────────────────────────────────────────
+download-pet-game:
+	@test -n "$(GAME)" || { echo "Usage: make download-pet-game GAME=<name>"; echo "Run 'make list-pet-games' to see available games."; exit 1; }
+	@game_entry="$(GAME_$(GAME))"; \
+	if [ -z "$$game_entry" ]; then \
+	    echo "Error: unknown game '$(GAME)'. Run 'make list-pet-games'."; exit 1; \
+	fi; \
+	url=$$(echo "$$game_entry" | cut -d'|' -f1); \
+	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
+	desc=$$(echo "$$game_entry" | cut -d'|' -f3); \
+	echo ""; \
+	echo "  ================================================================"; \
+	echo "  Commodore PET Game Download: $(GAME)"; \
+	echo "  ================================================================"; \
+	echo ""; \
+	echo "  $$desc"; \
+	echo "  Source: $$url"; \
+	echo "  Format: $$fmt"; \
+	echo ""; \
+	echo "  These game programs are distributed for preservation and"; \
+	echo "  educational purposes. Original copyrights may still apply."; \
+	echo ""; \
+	printf "  Proceed with download? [y/N] " && read ans && \
+	    case "$$ans" in \
+	        [yY]*) ;; \
+	        *) echo "  Aborted."; exit 1;; \
+	    esac; \
+	echo ""; \
+	mkdir -p $(ROMS)/games; \
+	outfile="$(ROMS)/games/$(GAME).$$fmt"; \
+	echo "  Downloading..."; \
+	curl -sf -o "$$outfile" "$$url" || { echo "  Error: download failed."; exit 1; }; \
+	echo "  Saved to $$outfile"; \
+	echo ""; \
+	if [ "$$fmt" = "prg" ]; then \
+	    echo "  Converting PRG to RAM hex + autorun..."; \
+	    python3 $(ROMS)/prg2hex.py "$$outfile" $(ROMS)/game.hex $(ROMS)/game.uart; \
+	elif [ "$$fmt" = "bas" ]; then \
+	    echo "  Converting BAS to UART input..."; \
+	    python3 $(ROMS)/bas2uart.py "$$outfile" $(ROMS)/game.uart; \
+	fi; \
+	echo ""; \
+	echo "  Done! Run with: make run-pet-game GAME=$(GAME)"; \
+	echo ""
+
+# ── Build and run a game ─────────────────────────────────────────────────────
+run-pet-game:
+	@test -n "$(GAME)" || { echo "Usage: make run-pet-game GAME=<name>"; exit 1; }
+	@game_entry="$(GAME_$(GAME))"; \
+	if [ -z "$$game_entry" ]; then \
+	    echo "Error: unknown game '$(GAME)'. Run 'make list-pet-games'."; exit 1; \
+	fi; \
+	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
+	if [ "$$fmt" = "prg" ]; then \
+	    test -f $(ROMS)/game.hex || { echo "Run 'make download-pet-game GAME=$(GAME)' first."; exit 1; }; \
+	    echo "Building with PRG game loaded into RAM..."; \
+	    rm -rf obj_dir; \
+	    verilator $(VFLAGS) -DGAME_PRG $(VSRCS) sim_top.cpp; \
+	    echo "Running $(GAME)..."; \
+	    ./obj_dir/Vsoc --autotype $(ROMS)/game.uart; \
+	elif [ "$$fmt" = "bas" ]; then \
+	    test -f $(ROMS)/game.uart || { echo "Run 'make download-pet-game GAME=$(GAME)' first."; exit 1; }; \
+	    echo "Building PET simulation..."; \
+	    $(MAKE) all; \
+	    echo "Running $(GAME) (auto-typing BASIC source)..."; \
+	    ./obj_dir/Vsoc --autotype $(ROMS)/game.uart; \
+	fi
 
 # ── Download and convert PET ROM files ───────────────────────────────────────
 download-pet-roms:
