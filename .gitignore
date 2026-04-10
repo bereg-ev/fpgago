@@ -71,3 +71,6 @@ romH2.vh
 # User-created architectures
 util/gcasm/user_archs.inc
 util/gcasm/user_mnemonics.inc
+
+# PET ROM binary dumps (downloaded, not committed)
+arch/pet/roms/*.bin

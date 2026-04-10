@@ -45,7 +45,7 @@ GAMES_RISC1 = char-snake
 GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess
 GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess
 
-.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 gcasm check-deps copyarch delarch newgame delgame
+.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 all-pet gcasm check-deps copyarch delarch newgame delgame download-pet-roms
 
 # ── Default target: show help ──────────────────────────────────────────────
 help:
@@ -90,7 +90,7 @@ gcasm:
 	$(MAKE) -C util/gcasm
 
 # ── Build everything ────────────────────────────────────────────────────────
-all: gcasm all-sdl2 all-risc1 all-risc2
+all: gcasm all-sdl2 all-risc1 all-risc2 all-pet
 
 all-sdl2:
 	@for g in $(GAMES_SDL2); do \
@@ -109,6 +109,13 @@ all-risc2: gcasm
 	    echo "=== $$g (risc2) ===" && \
 	    $(MAKE) build GAME=$$g ARCH=risc2; \
 	done
+
+all-pet:
+	@echo "=== Commodore PET (verilator) ==="
+	@$(MAKE) -C arch/pet/sim-desktop
+
+download-pet-roms:
+	@$(MAKE) -C arch/pet/sim-desktop download-pet-roms
 
 # ── Build a single game ────────────────────────────────────────────────────
 build: gcasm
