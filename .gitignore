@@ -76,3 +76,9 @@ util/gcasm/user_mnemonics.inc
 arch/spectrum/roms/*.bin
 arch/spectrum/roms/rom.hex
 arch/spectrum/cpu/tv80*.v
+# PET ROM binary dumps and game files (downloaded, not committed)
+arch/pet/roms/*.bin
+arch/pet/roms/games/
+arch/pet/roms/game.hex
+arch/pet/roms/game.uart
+arch/pet/roms/autorun.uart

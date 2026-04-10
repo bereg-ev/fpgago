@@ -47,11 +47,10 @@ MAKEOVERRIDES := $(filter-out TARGET=%,$(MAKEOVERRIDES))
 
 # ── Game/platform matrix ────────────────────────────────────────────────────
 GAMES_RISC1 = char-snake
-GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess
-GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess
+GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels
+GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess hello-pixels
 
-.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 gcasm check-deps copyarch delarch newgame delgame \
-       download-spectrum-rom download-tv80 run-spectrum
+.PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 all-pet gcasm check-deps copyarch delarch newgame delgame download-pet-roms download-pet-game run-pet-game list-pet-games download-spectrum-rom download-tv80 run-spectrum
 
 # ── Default target: show help ──────────────────────────────────────────────
 help:
@@ -81,6 +80,11 @@ help:
 	@printf "    make download-spectrum-rom                      Download ZX Spectrum ROM\n"
 	@printf "    make download-tv80                              Download TV80 Z80 CPU core\n"
 	@printf "    make run-spectrum                               Run ZX Spectrum simulation\n"
+	@printf "\033[32m  Commodore PET:\033[0m\n"
+	@printf "    make download-pet-roms                         Download PET firmware ROMs\n"
+	@printf "    make download-pet-game GAME=<name>             Download a PET game\n"
+	@printf "    make run-pet-game GAME=<name>                  Build + run a PET game\n"
+	@printf "    make list-pet-games                            List available PET games\n"
 	@printf "\n"
 	@printf "\033[32m  Setup:\033[0m\n"
 	@printf "    make check-deps                                Check installed tools\n"
@@ -88,8 +92,8 @@ help:
 	@printf "\033[32m  Examples:\033[0m\n"
 	@printf "    make run   GAME=char-snake ARCH=risc1 TARGET=verilator\n"
 	@printf "    make run   GAME=tic-tac-toe TARGET=sdl2\n"
-	@printf "    make copyarch SRC=risc1 DST=risc1-lcd\n"
-	@printf "    make newgame  GAME=mygame ARCH=risc1-lcd\n"
+	@printf "    make download-pet-game GAME=startrek\n"
+	@printf "    make run-pet-game GAME=startrek\n"
 	@printf "\n"
 
 # ── Check dependencies ─────────────────────────────────────────────────────
@@ -101,7 +105,7 @@ gcasm:
 	$(MAKE) -C util/gcasm
 
 # ── Build everything ────────────────────────────────────────────────────────
-all: gcasm all-sdl2 all-risc1 all-risc2
+all: gcasm all-sdl2 all-risc1 all-risc2 all-pet
 
 all-sdl2:
 	@for g in $(GAMES_SDL2); do \
@@ -120,6 +124,22 @@ all-risc2: gcasm
 	    echo "=== $$g (risc2) ===" && \
 	    $(MAKE) build GAME=$$g ARCH=risc2; \
 	done
+
+all-pet:
+	@echo "=== Commodore PET (verilator) ==="
+	@$(MAKE) -C arch/pet/sim-desktop
+
+download-pet-roms:
+	@$(MAKE) -C arch/pet/sim-desktop download-pet-roms
+
+download-pet-game:
+	@$(MAKE) -C arch/pet/sim-desktop download-pet-game GAME=$(GAME)
+
+run-pet-game:
+	@$(MAKE) -C arch/pet/sim-desktop run-pet-game GAME=$(GAME)
+
+list-pet-games:
+	@$(MAKE) -C arch/pet/sim-desktop list-pet-games
 
 # ── Build a single game ────────────────────────────────────────────────────
 build: gcasm
