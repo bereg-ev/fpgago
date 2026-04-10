@@ -71,3 +71,8 @@ romH2.vh
 # User-created architectures
 util/gcasm/user_archs.inc
 util/gcasm/user_mnemonics.inc
+
+# Downloaded ROMs and CPU cores (copyrighted or fetched at build time)
+arch/spectrum/roms/*.bin
+arch/spectrum/roms/rom.hex
+arch/spectrum/cpu/tv80*.v
