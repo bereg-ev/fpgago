@@ -80,13 +80,13 @@ VSRCS = \
     $(PERI)/lcd_out.v
 
 # ── Targets ──────────────────────────────────────────────────────────────────
-.PHONY: all run clean download-pet-roms download-pet-game run-pet-game list-pet-games
+.PHONY: all run clean download-pet-roms download-pet-game run-pet-game list-pet-games download-cpu
 
 all:
 	@if [ ! -f $(ROMS)/basic.hex ] || [ ! -f $(ROMS)/kernal.hex ] || [ ! -f $(ROMS)/chargen.hex ]; then \
 	    echo ""; \
 	    echo "  ROM hex files not found in $(ROMS)/"; \
-	    echo "  Run 'make download-pet-roms' to fetch Commodore PET ROMs."; \
+	    echo "  Run 'make download-rom ARCH=pet' to fetch Commodore PET ROMs."; \
 	    echo ""; \
 	    exit 1; \
 	fi
@@ -96,6 +96,10 @@ all:
 
 run: all
 	./obj_dir/Vsoc
+
+# ── Download CPU (6502 is in-repo, nothing to do) ──────────────────────────
+download-cpu:
+	@echo "  6502 CPU is included in the repository. Nothing to download."
 
 clean:
 	rm -rf obj_dir $(ROMS)/game.hex $(ROMS)/game.uart $(ROMS)/games
@@ -125,16 +129,16 @@ list-pet-games:
 	@echo "    poker        Poker card game"
 	@echo ""
 	@echo "  Usage:"
-	@echo "    make download-pet-game GAME=<name>"
-	@echo "    make run-pet-game GAME=<name>"
+	@echo "    make download-game ARCH=pet GAME=<name>"
+	@echo "    make run-game ARCH=pet GAME=<name>"
 	@echo ""
 
 # ── Download a specific game ─────────────────────────────────────────────────
 download-pet-game:
-	@test -n "$(GAME)" || { echo "Usage: make download-pet-game GAME=<name>"; echo "Run 'make list-pet-games' to see available games."; exit 1; }
+	@test -n "$(GAME)" || { echo "Usage: make download-game ARCH=pet GAME=<name>"; echo "Run 'make list-games ARCH=pet' to see available games."; exit 1; }
 	@game_entry="$(GAME_$(GAME))"; \
 	if [ -z "$$game_entry" ]; then \
-	    echo "Error: unknown game '$(GAME)'. Run 'make list-pet-games'."; exit 1; \
+	    echo "Error: unknown game '$(GAME)'. Run 'make list-games ARCH=pet'."; exit 1; \
 	fi; \
 	url=$$(echo "$$game_entry" | cut -d'|' -f1); \
 	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
@@ -171,26 +175,26 @@ download-pet-game:
 	    python3 $(ROMS)/bas2uart.py "$$outfile" $(ROMS)/game.uart; \
 	fi; \
 	echo ""; \
-	echo "  Done! Run with: make run-pet-game GAME=$(GAME)"; \
+	echo "  Done! Run with: make run-game ARCH=pet GAME=$(GAME)"; \
 	echo ""
 
 # ── Build and run a game ─────────────────────────────────────────────────────
 run-pet-game:
-	@test -n "$(GAME)" || { echo "Usage: make run-pet-game GAME=<name>"; exit 1; }
+	@test -n "$(GAME)" || { echo "Usage: make run-game ARCH=pet GAME=<name>"; exit 1; }
 	@game_entry="$(GAME_$(GAME))"; \
 	if [ -z "$$game_entry" ]; then \
-	    echo "Error: unknown game '$(GAME)'. Run 'make list-pet-games'."; exit 1; \
+	    echo "Error: unknown game '$(GAME)'. Run 'make list-games ARCH=pet'."; exit 1; \
 	fi; \
 	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
 	if [ "$$fmt" = "prg" ]; then \
-	    test -f $(ROMS)/game.hex || { echo "Run 'make download-pet-game GAME=$(GAME)' first."; exit 1; }; \
+	    test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=pet GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building with PRG game loaded into RAM..."; \
 	    rm -rf obj_dir; \
 	    verilator $(VFLAGS) -DGAME_PRG $(VSRCS) sim_top.cpp; \
 	    echo "Running $(GAME)..."; \
 	    ./obj_dir/Vsoc --autotype $(ROMS)/game.uart; \
 	elif [ "$$fmt" = "bas" ]; then \
-	    test -f $(ROMS)/game.uart || { echo "Run 'make download-pet-game GAME=$(GAME)' first."; exit 1; }; \
+	    test -f $(ROMS)/game.uart || { echo "Run 'make download-game ARCH=pet GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building PET simulation..."; \
 	    $(MAKE) all; \
 	    echo "Running $(GAME) (auto-typing BASIC source)..."; \

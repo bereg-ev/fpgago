@@ -49,7 +49,7 @@ module pet_keyboard(
     assign irq = irq_flag_b1 & crb[0];
 
     reg [7:0] key_matrix [0:8];   // 9 rows × 8 columns
-    reg [15:0] key_timer;
+    reg [17:0] key_timer;
 
     integer i;
 
@@ -185,7 +185,7 @@ module pet_keyboard(
 
             if (uart_rx_valid && map_valid && map_row < 9) begin
                 key_matrix[map_row][map_col] <= 1'b1;
-                key_timer <= 16'd50000;
+                key_timer <= 18'd200000;  // hold key for >1 frame
             end
 
             cb1_prev <= cb1;

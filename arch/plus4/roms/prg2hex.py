@@ -36,17 +36,11 @@ def convert(infile, hexfile, uartfile):
     print(f'  {infile}: {len(program)} bytes at ${load_addr:04X}-${end_addr:04X} -> {hexfile}')
 
     # Generate autorun:
-    #   poke59632,1     — writes to $E8F0, triggers hardware game copy
-    #   poke42,lo:poke43,hi — set VARTAB (end-of-BASIC pointer) so BASIC knows program size
-    #   clr              — reset BASIC variables
-    #   run              — start the game
+    #   poke59632,1  — writes to $E8F0, triggers hardware game copy
+    #   run          — starts the game after copy completes
     # (59632 = 0xE8F0, the game-load trigger I/O address)
-    # VARTAB at $002A/$002B must point one byte past end of program
-    vartab = end_addr + 1
-    vartab_lo = vartab & 0xFF
-    vartab_hi = (vartab >> 8) & 0xFF
     with open(uartfile, 'wb') as f:
-        f.write(f'poke59632,1:poke42,{vartab_lo}:poke43,{vartab_hi}\rclr\rrun\r'.encode())
+        f.write(b'poke59632,1\rrun\r')
 
     print(f'  autorun: {uartfile}')
 
