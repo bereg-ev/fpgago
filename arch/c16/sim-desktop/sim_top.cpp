@@ -154,7 +154,7 @@ static void autotype_load(const char* path)
     autotype_data.resize((size_t)sz);
     fread(autotype_data.data(), 1, (size_t)sz, f);
     fclose(f);
-    autotype_delay = 120;      /* wait 120 frames (~2.4 s) for C16 BASIC to boot */
+    autotype_delay = 120;      /* wait 120 frames for C16 BASIC to boot */
     autotype_pos = 0;
     fprintf(stderr, "autotype: loaded %ld bytes from %s\n", sz, path);
 }
@@ -240,10 +240,13 @@ int main(int argc, char** argv)
     top->clk = 0;
     top->eval();
 
+    top->joy = 0x1F;  /* all released (active-low) */
+
     fprintf(stderr,
         "Commodore C16 simulation started.\n"
         "LCD: %d x %d  window: %d x %d\n"
-        "Type to interact with BASIC. ESC to quit.\n",
+        "Type to interact with BASIC. ESC to quit.\n"
+        "Joystick: arrow keys + Space=fire\n",
         LCD_W, LCD_H, LCD_W * WIN_SCALE, LCD_H * WIN_SCALE);
 
     while (running && !ctx->gotFinish())
@@ -294,16 +297,33 @@ int main(int argc, char** argv)
                     if (ch >= 32 && ch <= 126)
                         uart_queue.push(ch);
                 }
-                else if (ev.type == SDL_KEYDOWN)
+                else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)
                 {
                     SDL_Keycode sym = ev.key.keysym.sym;
+                    bool pressed = (ev.type == SDL_KEYDOWN);
 
-                    if (sym == SDLK_ESCAPE)
-                        running = false;
-                    else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER)
-                        uart_queue.push(0x0Du);
-                    else if (sym == SDLK_BACKSPACE)
-                        uart_queue.push(0x08u);
+                    /* Joystick: arrows + WASD, space/ctrl = fire (active-low) */
+                    /* joy bits: [0]=up [1]=down [2]=left [3]=right [4]=fire */
+                    /* MiST JOY0 convention: [0]=right [1]=left [2]=down [3]=up [4]=fire */
+                    switch (sym) {
+                    case SDLK_UP:    case SDLK_w: if (pressed) top->joy &= ~8u;  else top->joy |= 8u;  break;
+                    case SDLK_DOWN:  case SDLK_s: if (pressed) top->joy &= ~4u;  else top->joy |= 4u;  break;
+                    case SDLK_LEFT:  case SDLK_a: if (pressed) top->joy &= ~2u;  else top->joy |= 2u;  break;
+                    case SDLK_RIGHT: case SDLK_d: if (pressed) top->joy &= ~1u;  else top->joy |= 1u;  break;
+                    case SDLK_SPACE: case SDLK_LCTRL: case SDLK_RCTRL:
+                        if (pressed) top->joy &= ~16u; else top->joy |= 16u; break;
+                    default: break;
+                    }
+
+                    /* Keyboard (only on press) */
+                    if (pressed) {
+                        if (sym == SDLK_ESCAPE)
+                            running = false;
+                        else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER)
+                            uart_queue.push(0x0Du);
+                        else if (sym == SDLK_BACKSPACE)
+                            uart_queue.push(0x08u);
+                    }
                 }
             }
         }

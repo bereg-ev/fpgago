@@ -59,6 +59,7 @@ VSRCS = \
     $(UTIL)/ecp5_simul.v \
     $(PERI)/uart.v \
     $(PERI)/lcd_out.v \
+    $(PERI)/debugger.v \
     lcd_char_sim.v
 
 # ── Targets ──────────────────────────────────────────────────────────────────

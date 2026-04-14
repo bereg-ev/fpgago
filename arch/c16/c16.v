@@ -102,7 +102,8 @@ module C16 (
 
 	// Simulation keyboard input (directly feeds c16_keymatrix)
 	input sim_key_strobe,
-	input [7:0] sim_key_scancode
+	input [7:0] sim_key_scancode,
+	output TICK8   // pixel clock for framebuffer
     );
 
 parameter MODE_PAL = 1;
@@ -129,10 +130,9 @@ wire irq1;
 wire keyreset;
 
 // wire joysticks 
-// Joystick disabled in simulation — JOY0/JOY1 active-low inversions in original
-// MiST code interfere with keyboard when no real joystick is connected.
-wire [4:0] joy0_sel = 5'h1f;
-wire [4:0] joy1_sel = 5'h1f;
+// Joystick active-low: 0=pressed. Use keyboard_row for row select, no inversion on JOY bits.
+wire [4:0] joy0_sel = (!keyboard_row[2]) ? {JOY0[4],JOY0[0],JOY0[1],JOY0[2],JOY0[3]} : 5'h1f;
+wire [4:0] joy1_sel = (!keyboard_row[1]) ? {JOY1[4],JOY1[0],JOY1[1],JOY1[2],JOY1[3]} : 5'h1f;
 assign kbus[3:0] = kbus_kbd[3:0] & joy0_sel[3:0] & joy1_sel[3:0];
 assign kbus[5:4] = kbus_kbd[5:4]; // no joystick line connected here
 assign kbus[6] = kbus_kbd[6] & joy0_sel[4];
@@ -198,7 +198,8 @@ ted mos8360(
 	.snd(sound),
 	.snd_pcm(AUDIO_PCM),
 	.pal(PAL),
-	.cpuenable(cpuenable)
+	.cpuenable(cpuenable),
+	.tick8_out(TICK8)
 	);
 	
 // Kernal rom

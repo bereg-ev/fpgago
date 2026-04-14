@@ -165,10 +165,19 @@ build: gcasm
 	    fi; \
 	elif [ "$(ARCH)" = "risc1" ]; then \
 	    echo "Building $(GAME) for RISC1..." && \
-	    $(MAKE) -C games/$(GAME); \
+	    $(MAKE) -C games/$(GAME) && \
+	    $(MAKE) -C games/$(GAME) copy && \
+	    if [ "$(TARGET)" = "fpga" ]; then \
+	        echo "Synthesizing for FPGA..." && \
+	        cd arch/risc1 && bash run.sh; \
+	    fi; \
 	elif [ -n "$(ARCH)" ]; then \
 	    echo "Building $(GAME) for $(ARCH)..." && \
-	    $(MAKE) -C games/$(GAME)/src/platform/$(ARCH); \
+	    if [ "$(TARGET)" = "fpga" ]; then \
+	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-fpga; \
+	    else \
+	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH); \
+	    fi; \
 	else \
 	    echo "Error: specify ARCH=<arch> or TARGET=sdl2"; exit 1; \
 	fi

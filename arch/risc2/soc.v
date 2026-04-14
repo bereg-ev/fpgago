@@ -72,8 +72,10 @@ module soc(
 
     assign led2 = sled2;
 
-    wire xdbg1, xdbg2;
+    wire [7:0] icache_dbg;
     wire [7:0] dummy;
+    wire xdbg1 = icache_dbg[7];
+    wire xdbg2 = icache_dbg[6];
     assign dbg1 = xdbg1;
     assign dbg2 = xdbg2;
 
@@ -344,7 +346,7 @@ module soc(
         .sd_clk(),                                          // xclk driven above
         .sd_cke(xcke), .sd_cs(xcs), .sd_ras(xras), .sd_cas(xcas), .sd_we(xwe),
         .sd_a(xa), .sd_d(xd), .sd_ba(xba), .sd_ldqm(xldqm), .sd_udqm(xudqm),
-        .dbg({xdbg1, xdbg2, 6'b0})
+        .dbg(icache_dbg)
     );
 
     /* Y SDRAM: memory-mapped framebuffer with write-combining cache */

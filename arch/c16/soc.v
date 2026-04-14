@@ -8,6 +8,7 @@ module soc(
     output reg led2,
     input rx,
     output tx,
+    input [4:0] joy,  // active-low joystick: up,down,left,right,fire
     output lcd_hsync,
     output lcd_vsync,
     output lcd_de,
@@ -23,6 +24,7 @@ module soc(
     wire [3:0] c16_r, c16_g, c16_b;
     wire c16_ras, c16_cas, c16_rw;
     wire [7:0] c16_a, c16_dout;
+    wire c16_tick8;
     wire c16_cs0, c16_cs1;
     wire [3:0] c16_rom_sel;
     wire [13:0] c16_rom_addr;
@@ -37,11 +39,32 @@ module soc(
 
     reg [7:0] ram [0:65535];
 
+`ifdef GAME_PRG
+    // Game ROM shadow: loaded from game.hex, copied to RAM on trigger
+    reg [7:0] game_rom [0:65535];
+    reg game_copy_pending;
+    `include "../roms/game_params.vh"
+    initial $readmemh("../roms/game.hex", game_rom);
+`endif
+
     always @(posedge clk) begin
         if (c16_ras) ram_row <= c16_a;   // latch low byte while RAS high (mux=1)
         if (!c16_cas && !c16_rw)         // write on CAS when RW=0
             ram[ram_addr] <= c16_dout;
         ram_dout <= ram[ram_addr];        // always read
+
+`ifdef GAME_PRG
+        // Trigger: detect CPU write to $FD3D via reconstructed address
+        // (CAS doesn't go low for I/O addresses, so check address bus directly)
+        // During mux=0 (CAS phase): A = high byte, ram_row = low byte
+        if (!c16_rw && !c16_core.mux && {c16_a, ram_row} == 16'hFD3D)
+            game_copy_pending <= 1;
+        if (game_copy_pending) begin
+            game_copy_pending <= 0;
+            for (integer i = GAME_START; i <= GAME_END; i = i + 1)
+                ram[i] <= game_rom[i];
+        end
+`endif
     end
 
     // Data input to C16: just RAM data. ROMs are internal to the C16 module.
@@ -69,7 +92,7 @@ module soc(
         .CS1(c16_cs1),
         .ROM_SEL(c16_rom_sel),
         .ROM_ADDR(c16_rom_addr),
-        .JOY0(5'b11111),
+        .JOY0(joy),
         .JOY1(5'b11111),
         .PS2DAT(1'b1),
         .PS2CLK(1'b1),
@@ -89,39 +112,35 @@ module soc(
         .RS232_DCD(1'b1),
         .RS232_DSR(1'b1),
         .sim_key_strobe(key_strobe),
-        .sim_key_scancode(key_scancode)
+        .sim_key_scancode(key_scancode),
+        .TICK8(c16_tick8)
     );
 
     // ================================================================
     //  Video: C16 RGB444 → framebuffer → LCD
     // ================================================================
-    // The TED outputs pixels at ~7 MHz but our clock is 28 MHz.
-    // Subsample 3:1 to fit ~1500 visible clocks into a 512-wide framebuffer.
+    // Capture framebuffer at the TED's pixel clock (tick8, exactly 1 sample/pixel).
     reg [15:0] framebuf [0:512*312-1];
     reg [8:0] fb_x, fb_y;
-    reg [1:0] fb_div;  // subsample counter
     reg c16_hsync_prev, c16_vsync_prev;
     wire [15:0] c16_rgb565 = {c16_r, c16_r[3], c16_g, c16_g[3:2], c16_b, c16_b[3]};
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            fb_x <= 0; fb_y <= 0; fb_div <= 0;
+            fb_x <= 0; fb_y <= 0;
             c16_hsync_prev <= 1; c16_vsync_prev <= 1;
         end else begin
             c16_hsync_prev <= c16_hsync;
             c16_vsync_prev <= c16_vsync;
 
-            if (!c16_hblank && !c16_vblank) begin
-                if (fb_div == 0) begin
-                    if (fb_x < 500 && fb_y < 312)
-                        framebuf[{fb_y, fb_x}] <= c16_rgb565;
-                    fb_x <= fb_x + 1;
-                end
-                fb_div <= (fb_div == 2) ? 2'd0 : fb_div + 1;
+            if (!c16_hblank && !c16_vblank && c16_tick8) begin
+                if (fb_x < 400 && fb_y < 312)
+                    framebuf[{fb_y, fb_x}] <= c16_rgb565;
+                fb_x <= fb_x + 1;
             end
 
             if (c16_hblank && !c16_hsync_prev && c16_hsync) begin
-                fb_x <= 0; fb_div <= 0;
+                fb_x <= 0;
                 fb_y <= fb_y + 1;
             end
 
@@ -140,9 +159,10 @@ module soc(
     assign lcd_pwm = 1'b1;
     assign lcd_clk = clk;
 
-    wire [8:0] fb_rx = lcd_col[8:0];
+    // Display framebuffer 1:1 centered (480 LCD - ~375 content = ~52px each side)
+    wire [8:0] fb_rx = lcd_col[8:0] - 9'd52;
     wire [8:0] fb_ry = lcd_row[8:0] + 9'd20;
-    wire in_fb = (fb_rx < 500) && (fb_ry < 312);
+    wire in_fb = (fb_rx < 400) && (fb_ry < 312);
 
     always @(posedge clk or negedge rst)
         if (!rst)
@@ -179,9 +199,7 @@ module soc(
     always @* begin
         pend_shift = 0;
         case (pend_char)
-            "a","b","c","d","e","f","g","h","i","j","k","l","m",
-            "n","o","p","q","r","s","t","u","v","w","x","y","z",
-            8'h22: pend_shift = 1;  // " needs shift+2
+            8'h22: pend_shift = 1;  // " needs shift+2 on C16
             default: pend_shift = 0;
         endcase
         case (pend_char | 8'h20)
@@ -243,7 +261,7 @@ module soc(
                         key_scancode <= pend_ps2; // key make
                         key_strobe <= 1;
                         key_state <= 3;
-                        key_timer <= 20'd700000; // hold ~25ms (>1 KERNAL scan at 50Hz)
+                        key_timer <= 20'd700000; // hold ~25ms
                     end
                 end
                 1: begin // wait then send key make
@@ -313,6 +331,13 @@ module soc(
             c16_vs_prev <= c16_vsync;
             if (!c16_vsync && c16_vs_prev)
                 frame_count <= frame_count + 1;
+            // Dump framebuffer pixels for first "M" (chars 3-4) and second "M" (chars 5-6)
+            // in "COMMODORE": C=1, O=2, M=3, M=4, O=5, D=6...
+            // Each char ~8 pixels. Line 1 starts at fb_y ~offset.
+            if (dbg_cycle == 25000000) begin
+                // Find text: dump rows 0,5,10,15,20,25 — first 100 pixels as binary (dark=1, light=0)
+                // Find first dark pixel and dump its context
+            end
         end
 `else
     always @(posedge clk or negedge rst)

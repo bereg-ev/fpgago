@@ -4,7 +4,7 @@
 module soc(
     input clk,
     input rst,
-    output reg led1,
+    output led1,
     output reg led2,
 
     input rx,
@@ -24,6 +24,7 @@ module soc(
     wire [7:0] port_addr, port_data_out;
     reg  [7:0] port_data_in;
     wire port_rd, port_wr;
+    wire [127:0] cpuDbg;
 
     // ---- Instruction ROM (1K x 18) ----
     dual_port_ram_1k_18 #(
@@ -35,27 +36,67 @@ module soc(
         .addr_b(10'b0), .din_b(18'b0)
     );
 
-    // ---- RISC1 CPU ----
-    cpu_risc1 cpu0(
-        .clk(clk), .clk_en(1'b1), .rst(rst),
-        .instr_addr(instr_addr), .instr_data(instr_data),
-        .port_addr(port_addr), .port_data_in(port_data_in), .port_data_out(port_data_out),
-        .port_rd(port_rd), .port_wr(port_wr),
-        .cpuDbg()
-    );
-
-    // ---- UART ----
+    // ---- Debugger + UART ----
     reg  [7:0] txdata;
     reg  txen, rxrdy, rxen0, rxovf;
     wire txbusy, rxen;
     wire [7:0] rxdata;
 
+`ifdef CPU_DEBUGGER
+    wire rxenA;
+    wire [7:0] rxdataA;
+    wire [7:0] dbg_txdata;
+    wire dbg_txen;
+    wire cpu_clk_en;
+    wire dbg_rst_req;
+    wire dbg_led;
+
+    uart uart0(
+        .clk(clk), .rst(rst),
+        .tx(tx), .rx(rx),
+        .txdata(txdata), .txen(txen), .txbusy(txbusy),
+        .rxdata(rxdataA), .rxen(rxenA)
+    );
+
+    debugger debug0(
+        .clk(clk), .rst(rst),
+        .rxen_in(rxenA), .rxdata_in(rxdataA),
+        .rxen_out(rxen), .rxdata_out(rxdata),
+        .txen(dbg_txen), .txdata(dbg_txdata),
+        .cpuDbg(cpuDbg),
+        .clk_en(cpu_clk_en),
+        .cpu_rst_req(dbg_rst_req),
+        .led(dbg_led)
+    );
+
+    wire cpu_rst = rst & (~dbg_rst_req);
+`else
     uart uart0(
         .clk(clk), .rst(rst),
         .tx(tx), .rx(rx),
         .txdata(txdata), .txen(txen), .txbusy(txbusy),
         .rxdata(rxdata), .rxen(rxen)
     );
+
+    wire cpu_rst = rst;
+    wire cpu_clk_en = 1'b1;
+    wire dbg_led = 1'b0;
+    wire dbg_txen = 1'b0;
+    wire [7:0] dbg_txdata = 8'b0;
+`endif
+
+    // ---- RISC1 CPU ----
+    cpu_risc1 cpu0(
+        .clk(clk), .clk_en(cpu_clk_en), .rst(cpu_rst),
+        .instr_addr(instr_addr), .instr_data(instr_data),
+        .port_addr(port_addr), .port_data_in(port_data_in), .port_data_out(port_data_out),
+        .port_rd(port_rd), .port_wr(port_wr),
+        .cpuDbg(cpuDbg)
+    );
+
+    // ---- LED output (debugger overrides led1 when in debug mode) ----
+    reg sled1;
+    assign led1 = dbg_led ? 1'b1 : sled1;
 
     // ---- LCD timing generator ----
     wire [10:0] lcd_col, lcd_row;
@@ -119,10 +160,12 @@ module soc(
     // X = 112, Y = 8, chnumx = 32, chnumy = 16, enabled
     reg [2:0] init_cnt;
 
+    reg dbg_txen0;
+
     // ---- Main SoC logic ----
     always @(posedge clk or negedge rst)
     if (!rst) begin
-        {led1, led2, port_data_in, txdata, txen, rxen0, rxrdy, rxovf} <= 0;
+        {sled1, led2, port_data_in, txdata, txen, rxen0, rxrdy, rxovf, dbg_txen0} <= 0;
         {lchar_addr, lchar_data, lchar_we} <= 0;
         {txt_addr_reg, game_we, game_wr_addr, game_wr_data} <= 0;
         {prescaler, tick} <= 0;
@@ -132,6 +175,7 @@ module soc(
         rxen0   <= rxen;
         lchar_we <= 0;
         game_we  <= 0;
+        dbg_txen0 <= dbg_txen;
 
         // Timer prescaler
         if (prescaler == `TIMER_PRESCALE) begin
@@ -159,11 +203,11 @@ module soc(
             if (port_wr) begin
                 case (port_addr)
                     8'h00: begin                                    // LED set
-                        if (port_data_out[0]) led1 <= 1;
+                        if (port_data_out[0]) sled1 <= 1;
                         if (port_data_out[1]) led2 <= 1;
                     end
                     8'h01: begin                                    // LED clear
-                        if (port_data_out[0]) led1 <= 0;
+                        if (port_data_out[0]) sled1 <= 0;
                         if (port_data_out[1]) led2 <= 0;
                     end
                     8'h10: txt_addr_reg[7:0]  <= port_data_out;    // text addr low
@@ -190,6 +234,10 @@ module soc(
                         txen   <= ~txen;
                     end
                 endcase
+            end
+            else if (dbg_txen != dbg_txen0) begin               // Debugger TX
+                txdata <= dbg_txdata;
+                txen   <= ~txen;
             end
 
             // ---- UART RX edge detection ----

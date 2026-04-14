@@ -57,7 +57,8 @@ module ted(
 	 output wire [5:0] snd_pcm,
 	 output wire pal,
 	 input wire [7:0] k,
-	 output wire cpuenable						// this TED signals is needed only for FPGA bustiming and FPGA internal cpu. If external CPU is used, it is not needed.
+	 output wire cpuenable,						// this TED signals is needed only for FPGA bustiming and FPGA internal cpu. If external CPU is used, it is not needed.
+	 output wire tick8_out						// pixel clock for framebuffer capture
     );
 
 
@@ -347,7 +348,8 @@ always @(posedge clk)
 // Horizontal counter running on ~8Mhz and vertical counter qualified by horizontal counter
 //-------------------------------------------------------------------------------------------
 
-assign tick8=(phicounter[1:0]==3)?1'b1:1'b0; //8Mhz clock tick for pixelclock. tick8 must activate one fastclk cycle earlier to use it for hcounter 
+assign tick8=(phicounter[1:0]==3)?1'b1:1'b0; //8Mhz clock tick for pixelclock. tick8 must activate one fastclk cycle earlier to use it for hcounter
+assign tick8_out=tick8; 
 
 
 always @(posedge clk)

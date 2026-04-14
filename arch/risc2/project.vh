@@ -1,6 +1,6 @@
 
 //`define SIMULATION        // has effect on: sdram init timing, bootloader, lcd resolution
-//`define CPU_DEBUGGER
+`define CPU_DEBUGGER
 //`define AUDIO
 `define EXTENDED_MEM        // 8KB ROM + 16KB RAM (default: 4KB ROM + 4KB RAM)
 
