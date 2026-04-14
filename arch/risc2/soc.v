@@ -94,9 +94,10 @@ module soc(
     );
 `else
   `ifdef EXTENDED_MEM
-    /* Boot ROM: 2K words (8KB) across 2 banks of 1K words each */
+    /* Boot ROM: 3K words (12KB) across 3 banks of 1K words each */
     wire [17:0] romL0_iout, romH0_iout, romL0_dout, romH0_dout;
     wire [17:0] romL1_iout, romH1_iout, romL1_dout, romH1_dout;
+    wire [17:0] romL2_iout, romH2_iout, romL2_dout, romH2_dout;
 
     dual_port_ram_1k_18 #(
 `include "romL.vh"
@@ -128,18 +129,33 @@ module soc(
         .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH1_dout)
     );
 
-    reg rom_ibank, rom_dbank;
+    dual_port_ram_1k_18 #(
+`include "romL3.vh"
+        ) romL2 (
+        .clk_a(clk), .we_a(1'b0),
+        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL2_iout),
+        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romL2_dout)
+    );
+    dual_port_ram_1k_18 #(
+`include "romH3.vh"
+        ) romH2 (
+        .clk_a(clk), .we_a(1'b0),
+        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH2_iout),
+        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH2_dout)
+    );
+
+    reg [1:0] rom_ibank, rom_dbank;
     always @(posedge clk) begin
-        rom_ibank <= instr_addr[12];
-        rom_dbank <= data_addr[12];
+        rom_ibank <= instr_addr[13:12];
+        rom_dbank <= data_addr[13:12];
     end
 
-    assign instr_data = rom_ibank
-        ? {romH1_iout[15:0], romL1_iout[15:0]}
-        : {romH0_iout[15:0], romL0_iout[15:0]};
-    assign rom_out_value = rom_dbank
-        ? {romH1_dout[15:0], romL1_dout[15:0]}
-        : {romH0_dout[15:0], romL0_dout[15:0]};
+    assign instr_data = rom_ibank == 2'd2 ? {romH2_iout[15:0], romL2_iout[15:0]}
+                      : rom_ibank == 2'd1 ? {romH1_iout[15:0], romL1_iout[15:0]}
+                      :                     {romH0_iout[15:0], romL0_iout[15:0]};
+    assign rom_out_value = rom_dbank == 2'd2 ? {romH2_dout[15:0], romL2_dout[15:0]}
+                         : rom_dbank == 2'd1 ? {romH1_dout[15:0], romL1_dout[15:0]}
+                         :                     {romH0_dout[15:0], romL0_dout[15:0]};
   `else
     /* Boot ROM: 1K words (4KB) */
     dual_port_ram_1k_18 #(
@@ -257,8 +273,35 @@ module soc(
         .row(lcd_row), .col(lcd_col)
     );
 
+    /* Hardware LCD char init — enable display after reset so text is visible
+       even if software init (gpu_clear_black/lcd_init) hasn't run yet */
+    reg [2:0] lcdi_cnt;
+    reg [23:0] lcdi_addr;
+    reg [15:0] lcdi_data;
+    reg        lcdi_we;
+
+    always @(posedge clk or negedge rst)
+    if (!rst) begin
+        lcdi_cnt <= 0;
+        lcdi_we  <= 0;
+    end else if (lcdi_cnt < 4) begin
+        lcdi_cnt <= lcdi_cnt + 1;
+        lcdi_we  <= 1;
+        case (lcdi_cnt)
+            0: begin lcdi_addr <= 24'h0C0000; lcdi_data <= 16'd112;   end  // X = 112
+            1: begin lcdi_addr <= 24'h0C0001; lcdi_data <= 16'd0;     end  // Y = 0
+            2: begin lcdi_addr <= 24'h0C0002; lcdi_data <= 16'd32;    end  // chnumx = 32
+            3: begin lcdi_addr <= 24'h0C0003; lcdi_data <= 16'h8011;  end  // enabled=1, chnumy=17
+        endcase
+    end else
+        lcdi_we <= 0;
+
+    wire        lcd_we   = (lcdi_cnt < 4) ? lcdi_we : data_wr;
+    wire [23:0] lcd_addr = (lcdi_cnt < 4) ? lcdi_addr : data_addr[23:0];
+    wire [15:0] lcd_wdata = (lcdi_cnt < 4) ? lcdi_data : data_out_value[15:0];
+
     lcd_char lcdc0(.clk(clk), .rst(rst),
-        .ctrl_addr(data_addr[23:0]), .ctrl_data(data_out_value[15:0]), .ctrl_we(data_wr),
+        .ctrl_addr(lcd_addr), .ctrl_data(lcd_wdata), .ctrl_we(lcd_we),
         .row(lcd_row), .col(lcd_col),
         .char_pixel_out(char_pixel_out), .char_active(char_active)
     );
@@ -350,7 +393,19 @@ module soc(
     );
 
     /* Y SDRAM: memory-mapped framebuffer with write-combining cache */
-    wire gpu_busy;
+    wire gpu_busy_raw;
+    /* GPU watchdog: if dcache is stuck for 2M cycles (~100ms), report not busy
+       so the CPU's gpu_wait() doesn't spin forever when Y SDRAM is unresponsive */
+    reg [20:0] gpu_watchdog;
+    wire gpu_busy = gpu_busy_raw & ~gpu_watchdog[20];
+    always @(posedge clk or negedge rst)
+        if (!rst)
+            gpu_watchdog <= 0;
+        else if (!gpu_busy_raw)
+            gpu_watchdog <= 0;
+        else if (!gpu_watchdog[20])
+            gpu_watchdog <= gpu_watchdog + 1;
+
     dcache dcache0(
         .clk(clk), .rst(rst),
         .row(lcd_row), .col(lcd_col),
@@ -358,7 +413,7 @@ module soc(
         .ctrl_addr(data_addr[23:0]),
         .ctrl_data(data_out_value[15:0]),
         .ctrl_we(data_wr),
-        .gpu_busy(gpu_busy),
+        .gpu_busy(gpu_busy_raw),
         .sd_cke(ycke), .sd_cs(ycs), .sd_ras(yras), .sd_cas(ycas), .sd_we(ywe),
         .sd_a(ya), .sd_d(yd), .sd_ba(yba), .sd_ldqm(yldqm), .sd_udqm(yudqm)
     );
@@ -407,7 +462,7 @@ module soc(
                       : (xdata_pending ? 1'b0 : 1'b1);
 `else
   `ifdef EXTENDED_MEM
-        data_in_valid <= (data_rd && (data_addr[23:13] == 11'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
+        data_in_valid <= (data_rd && (data_addr[23:14] == 10'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
                       : (xdata_pending ? 1'b0 : 1'b1);
   `else
         data_in_valid <= (data_rd && (data_addr[23:12] == 12'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
@@ -419,7 +474,7 @@ module soc(
         if (data_rd2 && data_addr[23:15] == 9'b0)              // read boot memory (32KB)
 `else
   `ifdef EXTENDED_MEM
-        if (data_rd2 && data_addr[23:13] == 11'b0)             // read boot memory (8KB)
+        if (data_rd2 && data_addr[23:14] == 10'b0)             // read boot memory (12KB)
   `else
         if (data_rd2 && data_addr[23:12] == 12'b0)             // read boot memory (4KB)
   `endif

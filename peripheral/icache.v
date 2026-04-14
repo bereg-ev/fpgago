@@ -153,6 +153,8 @@ always @(posedge clk or negedge rst)
 
 `ifdef SIMULATION
 wire is_rom = (prev_addr[23:15] == 9'b0);
+`elsif EXTENDED_MEM
+wire is_rom = (prev_addr[23:14] == 10'b0);
 `else
 wire is_rom = (prev_addr[23:12] == 12'b0);
 `endif

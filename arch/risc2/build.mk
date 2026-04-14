@@ -68,7 +68,7 @@ rom.bin: $(ALL_ASM)
 	@rm -f $@.tmp
 
 install: rom.bin
-	cp rom.bin romL.vh romH.vh romL2.vh romH2.vh rom.hex $(ARCH_DIR)/
+	cp rom.bin romL.vh romH.vh romL2.vh romH2.vh romL3.vh romH3.vh rom.hex $(ARCH_DIR)/
 
 # ── Architecture run targets ────────────────────────────────────────────────
 run-verilator: install
@@ -81,4 +81,4 @@ run-gtkwave: install
 	cd $(ARCH_DIR) && bash simulate.sh
 
 clean:
-	rm -f $(GAME_ASM) *.asm.tmp rom.bin romL.vh romH.vh romL2.vh romH2.vh rom.hex
+	rm -f $(GAME_ASM) *.asm.tmp rom.bin romL.vh romH.vh romL2.vh romH2.vh romL3.vh romH3.vh rom.hex

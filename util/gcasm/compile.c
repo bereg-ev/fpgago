@@ -509,6 +509,16 @@ void compileStart(compile_t *d)
     compileWriteInitLines(fHi2, mem, MODE_UPPER_16_BITS, 1024);
   }
 
+  /* Third ROM bank (words 2048-3071) for 12KB boot ROM */
+  if (bit32)
+  {
+    FILE *fLo3, *fHi3;
+    TRY0((fLo3 = fopen("romL3.vh", "w+")) == NULL, "can't write romL3.vh");
+    compileWriteInitLines(fLo3, mem, MODE_LOWER_16_BITS, 2048);
+    TRY0((fHi3 = fopen("romH3.vh", "w+")) == NULL, "can't write romH3.vh");
+    compileWriteInitLines(fHi3, mem, MODE_UPPER_16_BITS, 2048);
+  }
+
   TRY0((fBin = fopen("rom.bin", "w+")) == NULL, "can't write rom.bin")
   fprintf(fBin, "%c%c%c", 0, 0, 0);
 

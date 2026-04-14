@@ -108,6 +108,7 @@ module C16 (
 
 parameter MODE_PAL = 1;
 parameter INTERNAL_ROM = 1;
+parameter HAS_FUNCTION_ROM = 0;  // 1 for Plus/4 (3+1 software)
 
 wire [15:0] c16_addr;
 wire [15:0] ted_addr;
@@ -213,10 +214,8 @@ ted mos8360(
 		.cs(CS1)
 		);
 wire [7:0] kernal_data_int;
-assign kernal_data = INTERNAL_ROM ? kernal_data_int : (~CS1 & RW) ? DIN : 8'hFF;
 
 // Basic rom
-
 	basic_rom basic(
 		.clk(CLK28),
 		.address_in(basic_dl_write?dl_addr:c16_addr[13:0]),
@@ -226,7 +225,41 @@ assign kernal_data = INTERNAL_ROM ? kernal_data_int : (~CS1 & RW) ? DIN : 8'hFF;
 		.cs(CS0)
 		);
 wire [7:0] basic_data_int;
-assign basic_data = INTERNAL_ROM ? basic_data_int : (~CS0 & RW) ? DIN : 8'hFF;
+
+// Function ROMs (3+1 software, Plus/4 only)
+generate if (HAS_FUNCTION_ROM) begin : func_roms
+	// Function LOW ROM ($8000-$BFFF when rom_sel[1:0]==1)
+	reg [7:0] func_lo [0:16383];
+	reg [7:0] func_lo_data;
+	reg func_lo_cs_prev;
+	wire func_lo_en = ~CS0 & func_lo_cs_prev & (rom_sel_reg[1:0] == 2'd1);
+	initial $readmemh("../roms/3plus1lo.hex", func_lo);
+	always @(posedge CLK28) begin
+		func_lo_cs_prev <= CS0;
+		if (func_lo_en) func_lo_data <= func_lo[c16_addr[13:0]];
+	end
+	wire [7:0] func_lo_out = (~CS0 & rom_sel_reg[1:0] == 2'd1) ? func_lo_data : 8'hFF;
+
+	// Function HIGH ROM ($C000-$FFFF when rom_sel[3:2]==1)
+	reg [7:0] func_hi [0:16383];
+	reg [7:0] func_hi_data;
+	reg func_hi_cs_prev;
+	wire func_hi_en = ~CS1 & func_hi_cs_prev & (rom_sel_reg[3:2] == 2'd1);
+	initial $readmemh("../roms/3plus1hi.hex", func_hi);
+	always @(posedge CLK28) begin
+		func_hi_cs_prev <= CS1;
+		if (func_hi_en) func_hi_data <= func_hi[c16_addr[13:0]];
+	end
+	wire [7:0] func_hi_out = (~CS1 & rom_sel_reg[3:2] == 2'd1) ? func_hi_data : 8'hFF;
+
+	// Banking via ROM_SEL (which masks $FCxx to always use KERNAL)
+	// ROM_SEL[1:0]==1 → Function LOW; ROM_SEL[3:2]==1 → Function HIGH
+	assign basic_data  = (ROM_SEL[1:0] == 2'd1) ? func_lo_out : (INTERNAL_ROM ? basic_data_int : (~CS0 & RW) ? DIN : 8'hFF);
+	assign kernal_data = (ROM_SEL[3:2] == 2'd1) ? func_hi_out : (INTERNAL_ROM ? kernal_data_int : (~CS1 & RW) ? DIN : 8'hFF);
+end else begin : no_func_roms
+	assign basic_data  = INTERNAL_ROM ? basic_data_int : (~CS0 & RW) ? DIN : 8'hFF;
+	assign kernal_data = INTERNAL_ROM ? kernal_data_int : (~CS1 & RW) ? DIN : 8'hFF;
+end endgenerate
 // Color decoder to 12bit RGB	
  
 colors_to_rgb colordecode (
@@ -384,12 +417,11 @@ wire [7:0] openbus_data = openbus_sel ? c16_datalatch : 8'hff;
 
 // SID extension
 reg sid_clk_en;
+reg sid_muxD, sid_clk;
 always @(posedge CLK28) begin
-	reg muxD, sid_clk;
-
 	sid_clk_en <= 0;
-	muxD <= mux;
-	if (~muxD & mux) begin
+	sid_muxD <= mux;
+	if (~sid_muxD & mux) begin
 		sid_clk <= ~sid_clk;
 		sid_clk_en <= sid_clk;
 	end

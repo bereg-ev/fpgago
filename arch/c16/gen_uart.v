@@ -762,9 +762,8 @@ end
 assign busy = bit_cnt != 0;
 assign tx = shift_reg[0];
 
+reg start_d;
 always @(posedge clk) begin
-	reg start_d;
-
 	if (reset) begin
 		bit_cnt <= 0;
 		start_d <= 0;

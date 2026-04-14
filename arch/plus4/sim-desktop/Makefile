@@ -1,21 +1,24 @@
-#
-# sim-desktop/Makefile — Plus/4 desktop simulation via Verilator + SDL2
-#
-
 REPO = ../../..
 CPU  = ../cpu
 UTIL = $(REPO)/util
 PERI = $(REPO)/peripheral
 PROJ = ..
 ROMS = ../roms
+C16  = ../../c16
 
-# ── ROM download URLs (VICE emulator project, GitHub) ───────────────────────
-ROM_BASE = https://raw.githubusercontent.com/VICE-Team/svn-mirror/main/vice/data/PLUS4
-ROM_BASIC   = basic-318006-01.bin
-ROM_KERNAL  = kernal-318004-05.bin
-# Character ROM is extracted from KERNAL at offset $1000 ($D000-$D7FF)
+VFLAGS = \
+    --cc --exe --build --top-module soc \
+    -DSIMULATION -DSIMULATION_SDL \
+    -I$(CPU) -I$(PROJ) --Mdir obj_dir --no-timing \
+    -Wno-BLKSEQ -Wno-UNDRIVEN -Wno-UNOPTFLAT -Wno-PINMISSING \
+    -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-WIDTHCONCAT -Wno-SELRANGE \
+    -Wno-CASEINCOMPLETE -Wno-INITIALDLY -Wno-UNSIGNED -Wno-IMPLICIT \
+    -Wno-CASEOVERLAP -Wno-CASEX -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
+    -CFLAGS  "$(shell sdl2-config --cflags) -DSIM_TITLE='\"Commodore Plus/4 — plus4 (ESC=quit)\"'" \
+    -LDFLAGS "$(shell sdl2-config --libs)"
 
-# ── Game catalog ────────────────────────────────────────────────────────────
+# ── Game catalog ─────────────────────────────────────────────────────────────
+# C16 and Plus/4 share the same game library (BASIC 3.5 compatible)
 GAMES_PRG_BASE = https://www.zimmers.net/anonftp/pub/cbm/plus4/Games/misc
 GAMES_BAS_BASE = https://raw.githubusercontent.com/GReaperEx/bcg/master
 
@@ -32,44 +35,31 @@ GAME_adventure  = $(GAMES_PRG_BASE)/a/Adventure.prg|prg|Text adventure
 GAME_prince     = $(GAMES_PRG_BASE)/p/Prince_Of_Persia_(fix_ACW).prg|prg|Prince of Persia
 GAME_wizardwor  = $(GAMES_PRG_BASE)/w/Wizard%20Of%20Wor.prg|prg|Wizard of Wor
 GAME_wizardakyrz = $(GAMES_PRG_BASE)/w/Wizard%20Of%20Akyrz.prg|prg|Wizard of Akyrz
+GAME_tuttifrutti = $(GAMES_PRG_BASE)/t/Tutti%20Frutti.prg|prg|Tutti Frutti (graphical arcade)
+GAME_tetris     = $(GAMES_PRG_BASE)/t/Tetris.prg|prg|Tetris
+GAME_trailblazer = $(GAMES_PRG_BASE)/t/Trailblazer.prg|prg|Trailblazer (racing)
+GAME_tacman     = $(GAMES_PRG_BASE)/t/Tacman.prg|prg|Tacman (Pac-Man clone)
+GAME_manicminer = $(GAMES_PRG_BASE)/m/Manic%20Miner.prg|prg|Manic Miner (platformer)
+GAME_thrust     = $(GAMES_PRG_BASE)/t/Thrust.prg|prg|Thrust (gravity shooter)
 GAME_guess      = $(GAMES_BAS_BASE)/guess.bas|bas|Number guessing game
 GAME_lunar      = $(GAMES_BAS_BASE)/lunar.bas|bas|Lunar lander simulation
 GAME_hammurabi  = $(GAMES_BAS_BASE)/hammurabi.bas|bas|Kingdom management
 
-# ── Verilator flags ─────────────────────────────────────────────────────────
-VFLAGS = \
-    --cc \
-    --exe \
-    --build \
-    --top-module soc \
-    -DSIMULATION \
-    -DSIMULATION_SDL \
-    -I$(CPU) \
-    -I$(PROJ) \
-    --Mdir obj_dir \
-    --no-timing \
-    -Wno-BLKSEQ \
-    -Wno-UNDRIVEN \
-    -Wno-UNOPTFLAT \
-    -Wno-PINMISSING \
-    -Wno-WIDTHEXPAND \
-    -Wno-WIDTHTRUNC \
-    -Wno-WIDTHCONCAT \
-    -Wno-SELRANGE \
-    -Wno-CASEINCOMPLETE \
-    -Wno-INITIALDLY \
-    -Wno-UNSIGNED \
-    -Wno-IMPLICIT \
-    -Wno-CASEOVERLAP \
-    -Wno-CASEX \
-    --converge-limit 500 \
-    -CFLAGS  "$(shell sdl2-config --cflags) -DSIM_TITLE='\"$(or $(SIM_GAME),Commodore Plus/4) — plus4 (ESC=quit)\"'" \
-    -LDFLAGS "$(shell sdl2-config --libs)"
-
-# ── Verilog source list ──────────────────────────────────────────────────────
+# Shared modules from C16 (same TED, CPU, keyboard, etc.)
 VSRCS = \
     $(PROJ)/soc.v \
-    $(PROJ)/fpgated.v \
+    $(C16)/c16.v \
+    $(C16)/ted.v \
+    $(C16)/mos8501.v \
+    $(C16)/gen_ram.v \
+    $(C16)/colors_to_rgb.v \
+    $(C16)/c16_keymatrix.v \
+    $(C16)/mos6529.v \
+    $(C16)/gen_uart.v \
+    $(PROJ)/basic_rom.v \
+    $(PROJ)/kernal_rom.v \
+    $(C16)/sigma_delta_dac.v \
+    $(C16)/stubs.v \
     $(CPU)/cpu_6502.v \
     $(CPU)/ALU.v \
     $(UTIL)/ecp5_simul.v \
@@ -77,10 +67,11 @@ VSRCS = \
     $(PERI)/lcd_out.v
 
 # ── Targets ──────────────────────────────────────────────────────────────────
-.PHONY: all run clean download-plus4-rom download-plus4-game run-plus4-game list-plus4-games download-cpu
+.PHONY: all run clean download-plus4-rom download-cpu \
+        download-plus4-game run-plus4-game list-plus4-games
 
 all:
-	@if [ ! -f $(ROMS)/basic.hex ] || [ ! -f $(ROMS)/kernal.hex ] || [ ! -f $(ROMS)/chargen.hex ]; then \
+	@if [ ! -f $(ROMS)/basic.hex ] || [ ! -f $(ROMS)/kernal.hex ]; then \
 	    echo ""; \
 	    echo "  ROM hex files not found in $(ROMS)/"; \
 	    echo "  Run 'make download-rom ARCH=plus4' to fetch Plus/4 ROMs."; \
@@ -88,85 +79,61 @@ all:
 	    exit 1; \
 	fi
 	verilator $(VFLAGS) $(VSRCS) sim_top.cpp
-	@echo ""
 	@echo "Build complete. Run with: ./obj_dir/Vsoc"
 
-run: all
-	./obj_dir/Vsoc
+run:
+	@if [ "$(TARGET)" = "fpga" ]; then \
+	    echo "Synthesizing Plus/4 for FPGA..."; \
+	    cd $(PROJ) && bash run.sh; \
+	else \
+	    $(MAKE) all; \
+	    ./obj_dir/Vsoc; \
+	fi
+
+clean:
+	rm -rf obj_dir $(ROMS)/game.hex $(ROMS)/game.uart $(ROMS)/game_params.vh $(ROMS)/games
+
+download-plus4-rom:
+	@echo "  ROMs are included in the repository. Nothing to download."
 
 download-cpu:
 	@echo "  6502 CPU is included in the repository. Nothing to download."
-
-clean:
-	rm -rf obj_dir $(ROMS)/game.hex $(ROMS)/game.uart $(ROMS)/games
-
-# ── Download and convert Plus/4 ROM files ────────────────────────────────────
-download-plus4-rom:
-	@echo ""
-	@echo "  ================================================================"
-	@echo "  Commodore Plus/4 ROM Download"
-	@echo "  ================================================================"
-	@echo ""
-	@echo "  This will download Commodore Plus/4 ROM images from the VICE"
-	@echo "  emulator project (https://github.com/VICE-Team/svn-mirror)."
-	@echo ""
-	@echo "  These ROM images contain proprietary Commodore firmware."
-	@echo "  They are Copyright (C) Commodore Business Machines."
-	@echo "  They are widely redistributed for preservation and educational"
-	@echo "  purposes, but remain under their original copyright."
-	@echo ""
-	@echo "  By proceeding, you acknowledge that:"
-	@echo "    - These ROMs are copyrighted material"
-	@echo "    - You accept responsibility for your use of them"
-	@echo "    - They are intended for personal/educational use only"
-	@echo ""
-	@printf "  Proceed with download? [y/N] " && read ans && \
-	    case "$$ans" in \
-	        [yY]*) ;; \
-	        *) echo "  Aborted."; exit 1;; \
-	    esac
-	@echo ""
-	@echo "  Downloading ROMs..."
-	@curl -sf -o $(ROMS)/$(ROM_BASIC)   $(ROM_BASE)/$(ROM_BASIC)   && echo "    $(ROM_BASIC) (16KB BASIC 3.5)"
-	@curl -sf -o $(ROMS)/$(ROM_KERNAL)  $(ROM_BASE)/$(ROM_KERNAL)  && echo "    $(ROM_KERNAL) (16KB KERNAL)"
-	@echo ""
-	@echo "  Converting to Verilog hex format..."
-	@python3 $(ROMS)/rom_convert.py convert         $(ROMS)/$(ROM_BASIC)   $(ROMS)/basic.hex
-	@python3 $(ROMS)/rom_convert.py convert          $(ROMS)/$(ROM_KERNAL)  $(ROMS)/kernal.hex
-	@python3 $(ROMS)/rom_convert.py convert-chargen  $(ROMS)/$(ROM_KERNAL) $(ROMS)/chargen.hex
-	@echo ""
-	@echo "  Done! ROM hex files ready in $(ROMS)/"
-	@echo "  Run 'make' to build the simulation."
-	@echo ""
 
 # ── List available games ─────────────────────────────────────────────────────
 list-plus4-games:
 	@echo ""
 	@echo "  Available Plus/4 games:"
 	@echo ""
-	@echo "  PRG games (from zimmers.net — BASIC text games, pre-loaded):"
-	@echo "    hangman      Hangman word game"
-	@echo "    mastermind   Mastermind code-breaking"
-	@echo "    nim          Nim strategy game"
-	@echo "    dice         Dice game"
-	@echo "    battleship   Battleship"
-	@echo "    roulette     Casino roulette"
-	@echo "    guessnr      Guess the number"
-	@echo "    tictactoe    Tic-tac-toe"
-	@echo "    slot         Slot machine"
-	@echo "    adventure    Text adventure"
-	@echo "    prince       Prince of Persia"
-	@echo "    wizardwor    Wizard of Wor"
-	@echo "    wizardakyrz  Wizard of Akyrz"
+	@echo "  PRG games (from zimmers.net — downloaded and loaded into RAM):"
+	@printf "    %-14s %s\n" "hangman"    "Hangman word game"
+	@printf "    %-14s %s\n" "mastermind" "Mastermind code-breaking"
+	@printf "    %-14s %s\n" "nim"        "Nim strategy game"
+	@printf "    %-14s %s\n" "dice"       "Dice game"
+	@printf "    %-14s %s\n" "battleship" "Battleship"
+	@printf "    %-14s %s\n" "roulette"   "Casino roulette"
+	@printf "    %-14s %s\n" "guessnr"    "Guess the number"
+	@printf "    %-14s %s\n" "tictactoe"  "Tic-tac-toe"
+	@printf "    %-14s %s\n" "slot"       "Slot machine"
+	@printf "    %-14s %s\n" "adventure"  "Text adventure"
+	@printf "    %-14s %s\n" "prince"     "Prince of Persia"
+	@printf "    %-14s %s\n" "wizardwor"  "Wizard of Wor"
+	@printf "    %-14s %s\n" "wizardakyrz" "Wizard of Akyrz"
 	@echo ""
-	@echo "  BAS games (from github.com/GReaperEx/bcg — BASIC source, auto-typed):"
-	@echo "    guess        Number guessing game"
-	@echo "    lunar        Lunar lander simulation"
-	@echo "    hammurabi    Kingdom management"
+	@echo "  Graphical games:"
+	@printf "    %-14s %s\n" "tuttifrutti" "Tutti Frutti (arcade)"
+	@printf "    %-14s %s\n" "tetris"      "Tetris"
+	@printf "    %-14s %s\n" "trailblazer" "Trailblazer (racing)"
+	@printf "    %-14s %s\n" "tacman"      "Tacman (Pac-Man clone)"
+	@printf "    %-14s %s\n" "manicminer"  "Manic Miner (platformer)"
+	@printf "    %-14s %s\n" "thrust"      "Thrust (gravity shooter)"
 	@echo ""
-	@echo "  Usage:"
-	@echo "    make download-game ARCH=plus4 GAME=<name>"
-	@echo "    make run-game ARCH=plus4 GAME=<name>"
+	@echo "  BASIC games (auto-typed via keyboard):"
+	@printf "    %-14s %s\n" "guess"      "Number guessing game"
+	@printf "    %-14s %s\n" "lunar"      "Lunar lander simulation"
+	@printf "    %-14s %s\n" "hammurabi"  "Kingdom management"
+	@echo ""
+	@echo "  Usage: make download-game ARCH=plus4 GAME=<name>"
+	@echo "         make run-game ARCH=plus4 GAME=<name>"
 	@echo ""
 
 # ── Download a specific game ─────────────────────────────────────────────────
@@ -180,28 +147,16 @@ download-plus4-game:
 	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
 	desc=$$(echo "$$game_entry" | cut -d'|' -f3); \
 	echo ""; \
-	echo "  ================================================================"; \
-	echo "  Commodore Plus/4 Game Download: $(GAME)"; \
-	echo "  ================================================================"; \
+	echo "  Downloading: $$desc"; \
+	echo "  URL: $$url"; \
 	echo ""; \
-	echo "  $$desc"; \
-	echo "  Source: $$url"; \
-	echo "  Format: $$fmt"; \
-	echo ""; \
-	echo "  These game programs are distributed for preservation and"; \
-	echo "  educational purposes. Original copyrights may still apply."; \
-	echo ""; \
-	printf "  Proceed with download? [y/N] " && read ans && \
-	    case "$$ans" in \
-	        [yY]*) ;; \
-	        *) echo "  Aborted."; exit 1;; \
-	    esac; \
+	echo "  NOTE: This game is copyrighted software."; \
+	echo "  By downloading you accept responsibility for complying with"; \
+	echo "  applicable copyright law in your jurisdiction."; \
 	echo ""; \
 	mkdir -p $(ROMS)/games; \
-	outfile="$(ROMS)/games/$(GAME).$$fmt"; \
-	echo "  Downloading..."; \
-	curl -sf -o "$$outfile" "$$url" || { echo "  Error: download failed."; exit 1; }; \
-	echo "  Saved to $$outfile"; \
+	outfile="$(ROMS)/games/$(GAME).$${fmt}"; \
+	curl -L --fail -o "$$outfile" "$$url" || { echo "Download failed."; exit 1; }; \
 	echo ""; \
 	if [ "$$fmt" = "prg" ]; then \
 	    echo "  Converting PRG to RAM hex + autorun..."; \
@@ -222,7 +177,13 @@ run-plus4-game:
 	    echo "Error: unknown game '$(GAME)'. Run 'make list-games ARCH=plus4'."; exit 1; \
 	fi; \
 	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
-	if [ "$$fmt" = "prg" ]; then \
+	if [ "$(TARGET)" = "fpga" ]; then \
+	    if [ "$$fmt" = "prg" ]; then \
+	        test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=plus4 GAME=$(GAME)' first."; exit 1; }; \
+	    fi; \
+	    echo "Synthesizing Plus/4 for FPGA..."; \
+	    cd $(PROJ) && bash run.sh; \
+	elif [ "$$fmt" = "prg" ]; then \
 	    test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=plus4 GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building with PRG game loaded into RAM..."; \
 	    rm -rf obj_dir; \

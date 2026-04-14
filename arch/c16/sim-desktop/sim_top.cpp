@@ -304,12 +304,12 @@ int main(int argc, char** argv)
 
                     /* Joystick: arrows + WASD, space/ctrl = fire (active-low) */
                     /* joy bits: [0]=up [1]=down [2]=left [3]=right [4]=fire */
-                    /* MiST JOY0 convention: [0]=right [1]=left [2]=down [3]=up [4]=fire */
+                    /* Joystick: arrow keys only (WASD reserved for keyboard) */
                     switch (sym) {
-                    case SDLK_UP:    case SDLK_w: if (pressed) top->joy &= ~8u;  else top->joy |= 8u;  break;
-                    case SDLK_DOWN:  case SDLK_s: if (pressed) top->joy &= ~4u;  else top->joy |= 4u;  break;
-                    case SDLK_LEFT:  case SDLK_a: if (pressed) top->joy &= ~2u;  else top->joy |= 2u;  break;
-                    case SDLK_RIGHT: case SDLK_d: if (pressed) top->joy &= ~1u;  else top->joy |= 1u;  break;
+                    case SDLK_UP:    if (pressed) top->joy &= ~8u;  else top->joy |= 8u;  break;
+                    case SDLK_DOWN:  if (pressed) top->joy &= ~4u;  else top->joy |= 4u;  break;
+                    case SDLK_LEFT:  if (pressed) top->joy &= ~2u;  else top->joy |= 2u;  break;
+                    case SDLK_RIGHT: if (pressed) top->joy &= ~1u;  else top->joy |= 1u;  break;
                     case SDLK_SPACE: case SDLK_LCTRL: case SDLK_RCTRL:
                         if (pressed) top->joy &= ~16u; else top->joy |= 16u; break;
                     default: break;

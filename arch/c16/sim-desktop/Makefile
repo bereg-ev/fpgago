@@ -69,8 +69,14 @@ all:
 	verilator $(VFLAGS) $(VSRCS) sim_top.cpp
 	@echo "Build complete. Run with: ./obj_dir/Vsoc"
 
-run: all
-	./obj_dir/Vsoc
+run:
+	@if [ "$(TARGET)" = "fpga" ]; then \
+	    echo "Synthesizing C16 for FPGA..."; \
+	    cd $(PROJ) && bash run.sh; \
+	else \
+	    $(MAKE) all; \
+	    ./obj_dir/Vsoc; \
+	fi
 
 clean:
 	rm -rf obj_dir $(ROMS)/game.hex $(ROMS)/game.uart $(ROMS)/game_params.vh $(ROMS)/games
@@ -156,7 +162,13 @@ run-c16-game:
 	    echo "Error: unknown game '$(GAME)'. Run 'make list-games ARCH=c16'."; exit 1; \
 	fi; \
 	fmt=$$(echo "$$game_entry" | cut -d'|' -f2); \
-	if [ "$$fmt" = "prg" ]; then \
+	if [ "$(TARGET)" = "fpga" ]; then \
+	    if [ "$$fmt" = "prg" ]; then \
+	        test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=c16 GAME=$(GAME)' first."; exit 1; }; \
+	    fi; \
+	    echo "Synthesizing C16 for FPGA..."; \
+	    cd $(PROJ) && bash run.sh; \
+	elif [ "$$fmt" = "prg" ]; then \
 	    test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=c16 GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building with PRG game loaded into RAM..."; \
 	    rm -rf obj_dir; \

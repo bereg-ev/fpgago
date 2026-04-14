@@ -31,6 +31,8 @@ module lcd_char(
     reg  in_window_d1;
 
 		reg ctrl_we_2;
+    reg [23:0] ctrl_addr_d;
+    reg [15:0] ctrl_data_d;
     reg txt_ena;
     reg chr_ena;
 
@@ -46,17 +48,26 @@ module lcd_char(
 //		ram_1k_18 #(
 //`include "ibm8x16.vh"
 //		) ramtxt0 (
-      .clk_a(clk), .we_a(ctrl_we_2 & txt_ena), .addr_a(ctrl_addr[9:0]), .din_a({2'b0, ctrl_data[15:0]}), //.dout_a(instr_data[17:0]),
+      .clk_a(clk), .we_a(ctrl_we_2 & txt_ena), .addr_a(ctrl_addr_d[9:0]), .din_a({2'b0, ctrl_data_d[15:0]}), //.dout_a(instr_data[17:0]),
       .clk_b(clk), .we_b(1'b0), .addr_b(txt_addr[9:0]), .din_b(18'b0), .dout_b({dummy[1:0], txt0_dob})
     );
 
-		dual_port_ram_1k_18 #(
-`include "ibm8x16.vh"
-      ) ramchr (
-      .clk_a(clk), .we_a(ctrl_we_2 & chr_ena), .addr_a(ctrl_addr[9:0]), .din_a({2'b0, ctrl_data}), //.dout_a(instr_data[17:0]),
-//      .clk_b(clk), .we_b(1'b0), .addr_b({colorchar[6:0], dy[3:0]}), .din_b(18'b0), .dout_b(chr_dob)
-      .clk_b(clk), .we_b(1'b0), .addr_b({colorchar[6:0], dy[3:1]}), .din_b(18'b0), .dout_b(chr_dob)
-    );
+		/* Font RAM — behavioral dual-port with $readmemh init.
+		   Using ram_1k_18 (inferred BRAM) instead of dual_port_ram_1k_18
+		   (explicit DP16KD _TECHMAP_REPLACE_) so yosys preserves the write port. */
+		reg [17:0] fontmem [0:1023];
+		initial $readmemh("ibm8x16.hex", fontmem);
+
+		reg [17:0] chr_dob_r;
+		assign chr_dob = chr_dob_r;
+
+		always @(posedge clk)
+		    if (ctrl_we_2 & chr_ena)
+		        fontmem[ctrl_addr_d[9:0]] <= {2'b0, ctrl_data_d};
+		    // no else-read on port A (write-only from CPU)
+
+		always @(posedge clk)
+		    chr_dob_r <= fontmem[{colorchar[6:0], dy[3:1]}];
 
 
 //	ramchr(.DOB(), .ADDRB(ctrl_addr[9:0]), .CLKB(clk), .DIB(ctrl_data), .ENB(chr_ena), .SSRB(1'b0), .WEB(ctrl_we & chr_ena),
@@ -96,6 +107,8 @@ module lcd_char(
   else
   begin
 		ctrl_we_2 <= ctrl_we;
+		ctrl_addr_d <= ctrl_addr;
+		ctrl_data_d <= ctrl_data;
 		txt_ena <= ctrl_addr[23:16] == 8'h0e;	// text RAM
 		chr_ena <= ctrl_addr[23:16] == 8'h0d;	// font ROM
 

@@ -1,17 +1,19 @@
 /*
- * sim_top.cpp — PET Verilator + SDL2 desktop simulation
+ * sim_top.cpp — Plus/4 Verilator + SDL2 desktop simulation
  *
- * Compiles the PET SoC via Verilator and renders the LCD pixel output
+ * Compiles the Plus/4 SoC via Verilator and renders the LCD pixel output
  * in an SDL2 window. Keyboard input is forwarded via UART.
  *
- * Build:  cd arch/pet/sim-desktop && make
+ * Build:  cd arch/plus4/sim-desktop && make
  * Run:    ./obj_dir/Vsoc
  *
  * Keys:
  *   ESC         — quit
- *   Printable   — sent to PET as ASCII via UART
+ *   Printable   — sent to Plus/4 as ASCII via UART
  *   Enter       — RETURN (0x0D)
  *   Backspace   — DEL (0x08)
+ *   Arrows      — joystick directions
+ *   Space/Ctrl  — joystick fire
  */
 
 #include <cstdio>
@@ -134,15 +136,10 @@ static void uart_print(Vsoc* top)
 
 /* ══════════════════════════════════════════════════════════════════════
  * 4.  Auto-typer: feed a file to UART after boot
- *
- * If AUTOTYPE_FILE is defined at compile time, the file is read into
- * memory and its bytes are injected into the UART queue after a boot
- * delay.  For .prg games, this is just "RUN\r".  For .bas programs,
- * it's the entire source plus "RUN\r".
  * ══════════════════════════════════════════════════════════════════════ */
 static std::vector<uint8_t> autotype_data;
 static size_t autotype_pos = 0;
-static int    autotype_delay = 0;     /* frames to wait before next char  */
+static int    autotype_delay = 0;
 
 static void autotype_load(const char* path)
 {
@@ -154,15 +151,11 @@ static void autotype_load(const char* path)
     autotype_data.resize((size_t)sz);
     fread(autotype_data.data(), 1, (size_t)sz, f);
     fclose(f);
-    autotype_delay = 30;       /* wait 30 frames (~0.5 s) for BASIC to boot */
+    autotype_delay = 120;      /* wait 120 frames for Plus/4 BASIC to boot */
     autotype_pos = 0;
     fprintf(stderr, "autotype: loaded %ld bytes from %s\n", sz, path);
 }
 
-/* Called once per frame.  Pushes ONE character into the UART queue,
- * then waits a few frames so the PET KERNAL's keyboard scan can
- * detect the key press, see it released, and be ready for the next.
- * After RETURN, waits longer for the PET to tokenize the line.      */
 static void autotype_tick()
 {
     if (autotype_data.empty() || autotype_pos >= autotype_data.size())
@@ -174,9 +167,9 @@ static void autotype_tick()
     uart_queue.push(ch);
 
     if (ch == 0x0Du)
-        autotype_delay = 20;   /* wait 20 frames after RETURN (line tokenization) */
+        autotype_delay = 60;   /* wait 60 frames after RETURN */
     else
-        autotype_delay = 3;    /* wait 3 frames between characters (debounce) */
+        autotype_delay = 10;   /* wait 10 frames between characters */
 }
 
 /* ── main ──────────────────────────────────────────────────────────── */
@@ -201,7 +194,7 @@ int main(int argc, char** argv)
     SDL_StartTextInput();
 
 #ifndef SIM_TITLE
-#define SIM_TITLE "Commodore PET — FPGAgo Simulation"
+#define SIM_TITLE "Commodore Plus/4 — FPGAgo Simulation"
 #endif
 
     SDL_Window* window = SDL_CreateWindow(
@@ -240,10 +233,13 @@ int main(int argc, char** argv)
     top->clk = 0;
     top->eval();
 
+    top->joy = 0x1F;  /* all released (active-low) */
+
     fprintf(stderr,
-        "Commodore PET simulation started.\n"
+        "Commodore Plus/4 simulation started.\n"
         "LCD: %d x %d  window: %d x %d\n"
-        "Type to interact with BASIC. ESC to quit.\n",
+        "Type to interact with BASIC. ESC to quit.\n"
+        "Joystick: arrow keys + Space=fire\n",
         LCD_W, LCD_H, LCD_W * WIN_SCALE, LCD_H * WIN_SCALE);
 
     while (running && !ctx->gotFinish())
@@ -279,7 +275,7 @@ int main(int argc, char** argv)
             SDL_RenderPresent(renderer);
             pixel_idx = 0;
 
-            /* Auto-typer: feed one line per frame after boot */
+            /* Auto-typer: feed one character per frame after boot */
             autotype_tick();
 
             SDL_Event ev;
@@ -294,16 +290,31 @@ int main(int argc, char** argv)
                     if (ch >= 32 && ch <= 126)
                         uart_queue.push(ch);
                 }
-                else if (ev.type == SDL_KEYDOWN)
+                else if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)
                 {
                     SDL_Keycode sym = ev.key.keysym.sym;
+                    bool pressed = (ev.type == SDL_KEYDOWN);
 
-                    if (sym == SDLK_ESCAPE)
-                        running = false;
-                    else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER)
-                        uart_queue.push(0x0Du);
-                    else if (sym == SDLK_BACKSPACE)
-                        uart_queue.push(0x08u);
+                    /* Joystick: arrow keys only (WASD reserved for keyboard) */
+                    switch (sym) {
+                    case SDLK_UP:    if (pressed) top->joy &= ~8u;  else top->joy |= 8u;  break;
+                    case SDLK_DOWN:  if (pressed) top->joy &= ~4u;  else top->joy |= 4u;  break;
+                    case SDLK_LEFT:  if (pressed) top->joy &= ~2u;  else top->joy |= 2u;  break;
+                    case SDLK_RIGHT: if (pressed) top->joy &= ~1u;  else top->joy |= 1u;  break;
+                    case SDLK_SPACE: case SDLK_LCTRL: case SDLK_RCTRL:
+                        if (pressed) top->joy &= ~16u; else top->joy |= 16u; break;
+                    default: break;
+                    }
+
+                    /* Keyboard (only on press) */
+                    if (pressed) {
+                        if (sym == SDLK_ESCAPE)
+                            running = false;
+                        else if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER)
+                            uart_queue.push(0x0Du);
+                        else if (sym == SDLK_BACKSPACE)
+                            uart_queue.push(0x08u);
+                    }
                 }
             }
         }

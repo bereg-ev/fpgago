@@ -1,6 +1,10 @@
 `timescale 1ns / 1ps
 `include "project.vh"
 
+// Plus/4 SoC — rebuilt on top of the working C16 core module.
+// The C16 and Plus/4 share the same TED 8360 chip, same 8501 CPU,
+// and same keyboard matrix. Only the ROM contents differ.
+
 module soc(
     input clk,
     input rst,
@@ -8,6 +12,7 @@ module soc(
     output reg led2,
     input rx,
     output tx,
+    input [4:0] joy,  // active-low joystick: up,down,left,right,fire
     output lcd_hsync,
     output lcd_vsync,
     output lcd_de,
@@ -17,364 +22,176 @@ module soc(
 );
 
     // ================================================================
-    //  FPGATED — cycle-exact TED chip
+    //  C16 core (shared TED+CPU+keyboard module, works for Plus/4 too)
     // ================================================================
-    wire [15:0] ted_addr_out;
-    wire [7:0]  ted_data_out;
-    wire        ted_cpuclk, ted_cpuenable;
-    wire [6:0]  ted_color;
-    wire        ted_csync, ted_irq, ted_ba;
-    wire        ted_mux, ted_ras, ted_cas;
-    wire        ted_cs0, ted_cs1, ted_aec;
-    wire        ted_hsync, ted_vsync;
-    wire        ted_data_oe;
-    wire        ted_snd;
-    wire signed [15:0] ted_digi_sound;
-    wire        ted_burst, ted_even;
-    wire        ted_pal;
+    wire c16_hsync, c16_vsync, c16_csync, c16_hblank, c16_vblank;
+    wire [3:0] c16_r, c16_g, c16_b;
+    wire c16_ras, c16_cas, c16_rw;
+    wire [7:0] c16_a, c16_dout;
+    wire c16_tick8;
+    wire c16_cs0, c16_cs1;
+    wire [3:0] c16_rom_sel;
+    wire [13:0] c16_rom_addr;
+    wire c16_pal;
+    wire [5:0] c16_audio_pcm;
 
-    // ================================================================
-    //  6502 CPU
-    // ================================================================
-    wire [15:0] cpu_ab;
-    wire [7:0]  cpu_do;
-    reg  [7:0]  cpu_di;
-    wire        cpu_we;
+    // RAM interface: reconstruct 16-bit address from multiplexed 8-bit A bus.
+    // Latch low byte while RAS is HIGH (mux=1 guaranteed), use high byte at CAS.
+    reg [7:0] ram_row;
+    wire [15:0] ram_addr = {c16_a, ram_row};
+    reg [7:0] ram_dout;
 
-    cpu cpu0(
-        .clk(clk), .reset(~rst),
-        .AB(cpu_ab), .DI(cpu_di), .DO(cpu_do),
-        .WE(cpu_we), .IRQ(ted_irq), .NMI(1'b0),
-        .RDY(ted_cpuenable)
-    );
-
-    // ================================================================
-    //  Memory: 64KB RAM + 16KB BASIC ROM + 16KB KERNAL ROM
-    // ================================================================
-    reg [7:0] main_ram [0:65535];
-    reg [7:0] basic_rom [0:16383];
-    reg [7:0] kernal_rom [0:16383];
-
-    initial $readmemh("../roms/basic.hex", basic_rom);
-    initial $readmemh("../roms/kernal.hex", kernal_rom);
+    reg [7:0] ram [0:65535];
 
 `ifdef GAME_PRG
+    // Game ROM shadow: loaded from game.hex, copied to RAM on trigger
     reg [7:0] game_rom [0:65535];
+    reg game_copy_pending;
+    `include "../roms/game_params.vh"
     initial $readmemh("../roms/game.hex", game_rom);
-`include "../roms/game_params.vh"
-    reg        game_copying, game_loaded;
-    reg [15:0] game_copy_addr;
-    wire       sel_gameload = (ted_addr_out == 16'hFD3D);
 `endif
 
-    // Bus address: CPU drives during CPU cycles (aec=1), TED during DMA (aec=0)
-    wire [15:0] bus_addr = ted_aec ? cpu_ab : ted_addr_out;
-
-    // Memory read at a given address, with ROM/RAM banking from TED cs signals
-    function [7:0] mem_read;
-        input [15:0] addr;
-        input cs0_n, cs1_n;   // active-low chip selects
-        begin
-            if (!cs0_n)
-                mem_read = basic_rom[addr[13:0]];
-            else if (!cs1_n)
-                mem_read = kernal_rom[addr[13:0]];
-            else if (addr[15])
-                // Fallback for early boot when cs signals haven't initialized:
-                // $8000-$BFFF → BASIC, $C000-$FFFF → KERNAL
-                mem_read = addr[14] ? kernal_rom[addr[13:0]] : basic_rom[addr[13:0]];
-            else
-                mem_read = main_ram[addr];
-        end
-    endfunction
-
-    // CPU data-in: ALWAYS reads from cpu_ab (never from DMA addresses).
-    // Registered and gated by cpuenable to break JMP1 combinational loop
-    // (same fix as PET: AB depends on DIMUX depends on DI depends on AB).
-    wire [7:0] cpu_mem = mem_read(cpu_ab, ted_cs0, ted_cs1);
-    wire [7:0] cpu_di_comb = ted_data_oe ? ted_data_out : cpu_mem;
-    always @(posedge clk)
-        if (ted_cpuenable)
-            cpu_di <= cpu_di_comb;
-
-    // DMA data: use tedaddress directly with 0 latency.
-    // The combinational loop (tedaddress → mem → data_in → charpointer → tedaddress)
-    // converges because memory is deterministic (same address → same data).
-    /* verilator lint_off UNOPTFLAT */
-    wire [7:0] dma_mem = mem_read(ted0.tedaddress, ted_cs0, ted_cs1);
-    /* verilator lint_on UNOPTFLAT */
-
-    // Data bus to TED: use addr_out_reg (stable within cycle, no aec glitches)
-    // for all reads.  Only switch to cpu_do during CPU writes.
-    // FPGATED uses data_in combinationally (charpointer during badline2),
-    // so the bus MUST be stable — addr_out_reg only changes at cycle_end.
-    // Use cpuenable (not aec) for write detection — aec glitches cause
-    // cpu_do to leak onto the bus during DMA when CPU is frozen in write state.
-    wire [7:0] data_bus = (ted_cpuenable && cpu_we) ? cpu_do
-                                                    : mem_read(ted0.addr_out_reg, ted_cs0, ted_cs1);
-
-    // RAM writes: CPU writes when AEC=1 (CPU owns bus) and WE=1
-    // Game loader also writes during copy phase
     always @(posedge clk) begin
+        if (c16_ras) ram_row <= c16_a;   // latch low byte while RAS high (mux=1)
+        if (!c16_cas && !c16_rw)         // write on CAS when RW=0
+            ram[ram_addr] <= c16_dout;
+        ram_dout <= ram[ram_addr];        // always read
+
 `ifdef GAME_PRG
-        if (!rst) begin
-            game_copying <= 0; game_loaded <= 0; game_copy_addr <= GAME_START;
-        end else begin
-            if (ted_cpuenable && cpu_we && sel_gameload && !game_loaded)
-                game_copying <= 1;
-            if (game_copying && !game_loaded) begin
-                main_ram[game_copy_addr] <= game_rom[game_copy_addr];
-                if (game_copy_addr == GAME_END) begin
-                    game_loaded <= 1; game_copying <= 0;
-                end else
-                    game_copy_addr <= game_copy_addr + 1;
-            end
+        // Trigger: detect CPU write to $FD3D via reconstructed address
+        if (!c16_rw && !c16_core.mux && {c16_a, ram_row} == 16'hFD3D)
+            game_copy_pending <= 1;
+        if (game_copy_pending) begin
+            game_copy_pending <= 0;
+            for (integer i = GAME_START; i <= GAME_END; i = i + 1)
+                ram[i] <= game_rom[i];
         end
 `endif
-        // Write RAM: addresses below $8000 are always RAM.
-        // Above $8000: write if both cs0 and cs1 are high (RAM mode, not ROM).
-        if (ted_cpuenable && cpu_we) begin
-            if (!cpu_ab[15] || (ted_cs0 && ted_cs1))
-                main_ram[cpu_ab] <= cpu_do;
-        end
     end
 
-    // ================================================================
-    //  UART (keyboard input)
-    // ================================================================
-    reg  [7:0] txdata;
-    reg  txen;
-    wire txbusy;
-    wire [7:0] rxdata;
-    wire rxen;
-    reg  rxen0;
+    // Data input to C16 core: just RAM data. ROMs are internal to the module.
+    wire [7:0] din_mux = ram_dout;
 
-    uart uart0(
-        .clk(clk), .rst(rst),
-        .tx(tx), .rx(rx),
-        .txdata(txdata), .txen(txen), .txbusy(txbusy),
-        .rxdata(rxdata), .rxen(rxen)
-    );
-
-    always @(posedge clk or negedge rst)
-        if (!rst) rxen0 <= 0;
-        else      rxen0 <= rxen;
-
-    // ================================================================
-    //  Keyboard matrix (UART → 8x8 matrix → TED k input)
-    // ================================================================
-    reg [7:0] key_matrix [0:7];
-    reg [17:0] key_timer;
-    reg [7:0] kbd_row_latch;  // active keyboard row from TED
-
-    integer i;
-
-    // TED writes to $FD30 for keyboard row select.
-    // We detect this when TED addresses $FD30 during a CPU write.
-    always @(posedge clk or negedge rst)
-        if (!rst) begin
-            kbd_row_latch <= 8'hFF;
-            for (i = 0; i < 8; i = i + 1) key_matrix[i] <= 8'h00;
-            key_timer <= 0;
-        end else begin
-            // Capture keyboard row select: CPU writes to $FD30
-            if (ted_aec && cpu_we && ted_cpuenable && cpu_ab == 16'hFD30)
-                kbd_row_latch <= cpu_do;
-
-            // Also capture from TED keylatch write ($FF08)
-            if (ted_aec && cpu_we && ted_cpuenable &&
-                (cpu_ab[15:8] == 8'hFF) && (cpu_ab[5:0] == 6'h08))
-                kbd_row_latch <= cpu_do;
-
-            // Key auto-release
-            if (key_timer > 0) begin
-                key_timer <= key_timer - 1;
-                if (key_timer == 1)
-                    for (i = 0; i < 8; i = i + 1) key_matrix[i] <= 8'h00;
-            end
-
-            // UART key input
-            if (rxen != rxen0 && kbd_map_valid) begin
-                for (i = 0; i < 8; i = i + 1) key_matrix[i] <= 8'h00;
-                key_matrix[kbd_map_row][kbd_map_col] <= 1'b1;
-                key_timer <= 18'd80000;
-            end
-        end
-
-    // Scan keyboard matrix based on row latch
-    reg [7:0] kbd_scan;
-    always @* begin
-        kbd_scan = 8'hFF;
-        for (i = 0; i < 8; i = i + 1)
-            if (!kbd_row_latch[i])
-                kbd_scan = kbd_scan & ~key_matrix[i];
-    end
-
-    // ASCII → Plus/4 matrix (from KERNAL ROM table at $E026)
-    reg [2:0] kbd_map_row, kbd_map_col;
-    reg       kbd_map_valid;
-    always @* begin
-        kbd_map_valid = 1; kbd_map_row = 0; kbd_map_col = 0;
-        case (rxdata)
-            8'h61: begin kbd_map_row=1; kbd_map_col=2; end  // a
-            8'h62: begin kbd_map_row=3; kbd_map_col=4; end  // b
-            8'h63: begin kbd_map_row=2; kbd_map_col=4; end  // c
-            8'h64: begin kbd_map_row=2; kbd_map_col=2; end  // d
-            8'h65: begin kbd_map_row=1; kbd_map_col=6; end  // e
-            8'h66: begin kbd_map_row=2; kbd_map_col=5; end  // f
-            8'h67: begin kbd_map_row=3; kbd_map_col=2; end  // g
-            8'h68: begin kbd_map_row=3; kbd_map_col=5; end  // h
-            8'h69: begin kbd_map_row=4; kbd_map_col=1; end  // i
-            8'h6A: begin kbd_map_row=4; kbd_map_col=2; end  // j
-            8'h6B: begin kbd_map_row=4; kbd_map_col=5; end  // k
-            8'h6C: begin kbd_map_row=5; kbd_map_col=2; end  // l
-            8'h6D: begin kbd_map_row=4; kbd_map_col=4; end  // m
-            8'h6E: begin kbd_map_row=4; kbd_map_col=7; end  // n
-            8'h6F: begin kbd_map_row=4; kbd_map_col=6; end  // o
-            8'h70: begin kbd_map_row=5; kbd_map_col=1; end  // p
-            8'h71: begin kbd_map_row=7; kbd_map_col=6; end  // q
-            8'h72: begin kbd_map_row=2; kbd_map_col=1; end  // r
-            8'h73: begin kbd_map_row=1; kbd_map_col=5; end  // s
-            8'h74: begin kbd_map_row=2; kbd_map_col=6; end  // t
-            8'h75: begin kbd_map_row=3; kbd_map_col=6; end  // u
-            8'h76: begin kbd_map_row=3; kbd_map_col=7; end  // v
-            8'h77: begin kbd_map_row=1; kbd_map_col=1; end  // w
-            8'h78: begin kbd_map_row=2; kbd_map_col=7; end  // x
-            8'h79: begin kbd_map_row=3; kbd_map_col=1; end  // y
-            8'h7A: begin kbd_map_row=1; kbd_map_col=4; end  // z
-            8'h30: begin kbd_map_row=4; kbd_map_col=3; end  // 0
-            8'h31: begin kbd_map_row=7; kbd_map_col=0; end  // 1
-            8'h32: begin kbd_map_row=7; kbd_map_col=3; end  // 2
-            8'h33: begin kbd_map_row=1; kbd_map_col=0; end  // 3
-            8'h34: begin kbd_map_row=1; kbd_map_col=3; end  // 4
-            8'h35: begin kbd_map_row=2; kbd_map_col=0; end  // 5
-            8'h36: begin kbd_map_row=2; kbd_map_col=3; end  // 6
-            8'h37: begin kbd_map_row=3; kbd_map_col=0; end  // 7
-            8'h38: begin kbd_map_row=3; kbd_map_col=3; end  // 8
-            8'h39: begin kbd_map_row=4; kbd_map_col=0; end  // 9
-            8'h0D: begin kbd_map_row=0; kbd_map_col=1; end  // RETURN
-            8'h20: begin kbd_map_row=7; kbd_map_col=4; end  // SPACE
-            8'h08: begin kbd_map_row=0; kbd_map_col=0; end  // DEL
-            8'h7F: begin kbd_map_row=0; kbd_map_col=0; end  // DEL
-            8'h2A: begin kbd_map_row=6; kbd_map_col=1; end  // *
-            8'h2B: begin kbd_map_row=6; kbd_map_col=6; end  // +
-            8'h2C: begin kbd_map_row=5; kbd_map_col=7; end  // ,
-            8'h2D: begin kbd_map_row=5; kbd_map_col=6; end  // -
-            8'h2E: begin kbd_map_row=5; kbd_map_col=4; end  // .
-            8'h2F: begin kbd_map_row=6; kbd_map_col=7; end  // /
-            8'h3A: begin kbd_map_row=5; kbd_map_col=5; end  // :
-            8'h3B: begin kbd_map_row=6; kbd_map_col=2; end  // ;
-            8'h3D: begin kbd_map_row=6; kbd_map_col=5; end  // =
-            8'h40: begin kbd_map_row=0; kbd_map_col=7; end  // @
-            default: kbd_map_valid = 0;
-        endcase
-    end
-
-    // ================================================================
-    //  TED instantiation
-    // ================================================================
-    ted ted0(
-        .clk(clk),
-        .addr_in(cpu_ab),
-        .addr_out(ted_addr_out),
-        .data_in(data_bus),
-        .data_out(ted_data_out),
-        .rw(ted_cpuenable ? ~cpu_we : 1'b1),  // Only signal write during CPU enable; frozen WE leaks corrupt regs
-        .cpuclk(ted_cpuclk),
-        .color(ted_color),
-        .csync(ted_csync),
-        .irq(ted_irq),
-        .ba(ted_ba),
-        .mux(ted_mux),
-        .ras(ted_ras),
-        .cas(ted_cas),
-        .cs0(ted_cs0),
-        .cs1(ted_cs1),
-        .aec(ted_aec),
-        .snd(ted_snd),
-        .digi_sound(ted_digi_sound),
-        .k(kbd_scan),
-        .cpuenable(ted_cpuenable),
-        .pal(ted_pal),
-        .hsync(ted_hsync),
-        .vsync(ted_vsync),
-        .burst(ted_burst),
-        .even(ted_even),
-        .data_oe(ted_data_oe)
+    C16 #(.HAS_FUNCTION_ROM(1)) c16_core(
+        .CLK28(clk),
+        .RESET(~rst),
+        .WAIT(1'b0),
+        .HSYNC(c16_hsync),
+        .VSYNC(c16_vsync),
+        .CSYNC(c16_csync),
+        .HBLANK(c16_hblank),
+        .VBLANK(c16_vblank),
+        .RED(c16_r),
+        .GREEN(c16_g),
+        .BLUE(c16_b),
+        .RAS(c16_ras),
+        .CAS(c16_cas),
+        .RW(c16_rw),
+        .A(c16_a),
+        .DIN(din_mux),
+        .DOUT(c16_dout),
+        .CS0(c16_cs0),
+        .CS1(c16_cs1),
+        .ROM_SEL(c16_rom_sel),
+        .ROM_ADDR(c16_rom_addr),
+        .JOY0(joy),
+        .JOY1(5'b11111),
+        .PS2DAT(1'b1),
+        .PS2CLK(1'b1),
+        .IEC_DATAIN(1'b1),
+        .IEC_CLKIN(1'b1),
+        .CASS_READ(1'b1),
+        .CASS_SENSE(1'b1),
+        .SID_TYPE(2'b00),
+        .AUDIO_PCM(c16_audio_pcm),
+        .dl_addr(14'd0),
+        .dl_data(8'd0),
+        .kernal_dl_write(1'b0),
+        .basic_dl_write(1'b0),
+        .PAL(c16_pal),
+        .RS232_RX(1'b1),  // idle; keyboard uses separate UART
+        .RS232_TX(tx),
+        .RS232_DCD(1'b1),
+        .RS232_DSR(1'b1),
+        .sim_key_strobe(key_strobe),
+        .sim_key_scancode(key_scancode),
+        .TICK8(c16_tick8)
     );
 
     // ================================================================
-    //  Video: TED 7-bit color → RGB565 → framebuffer → LCD
+    //  Video
     // ================================================================
+    wire [15:0] c16_rgb565 = {c16_r, c16_r[3], c16_g, c16_g[3:2], c16_b, c16_b[3]};
+    assign lcd_pwm = 1'b1;
+    assign lcd_clk = clk;
 
-    // TED color (7 bits: luma[6:4] + chroma[3:0]) → RGB565
-    // TED 7-bit color → RGB565 lookup
-    // color[6:4] = luminance (0-7), color[3:0] = chrominance (0-15)
-    // Same palette function as plus4_ted.v
-    function [15:0] ted_rgb565;
-        input [6:0] c;
-        reg [2:0] luma;
-        reg [3:0] chroma;
-        reg [7:0] y, r, g, b;
-        reg signed [8:0] rs, gs, bs;
-        begin
-            luma = c[6:4]; chroma = c[3:0];
-            case (luma)
-                3'd0: y=8'd0;   3'd1: y=8'd30;  3'd2: y=8'd55;  3'd3: y=8'd85;
-                3'd4: y=8'd115; 3'd5: y=8'd150; 3'd6: y=8'd190; 3'd7: y=8'd235;
-            endcase
-            if (chroma <= 4'd1) begin
-                r = (chroma==0) ? 8'd0 : y; g = r; b = r;
-            end else begin
-                case (chroma)
-                    4'd2:  begin rs=9'd80;  gs=-9'd40; bs=-9'd50; end
-                    4'd3:  begin rs=-9'd60; gs=9'd30;  bs=9'd40;  end
-                    4'd4:  begin rs=9'd50;  gs=-9'd50; bs=9'd70;  end
-                    4'd5:  begin rs=-9'd50; gs=9'd50;  bs=-9'd50; end
-                    4'd6:  begin rs=-9'd30; gs=-9'd30; bs=9'd90;  end
-                    4'd7:  begin rs=9'd40;  gs=9'd40;  bs=-9'd70; end
-                    4'd8:  begin rs=9'd70;  gs=-9'd10; bs=-9'd60; end
-                    4'd9:  begin rs=9'd50;  gs=-9'd10; bs=-9'd50; end
-                    4'd10: begin rs=-9'd10; gs=9'd50;  bs=-9'd50; end
-                    4'd11: begin rs=9'd60;  gs=-9'd40; bs=9'd10;  end
-                    4'd12: begin rs=-9'd50; gs=9'd30;  bs=9'd10;  end
-                    4'd13: begin rs=-9'd20; gs=-9'd10; bs=9'd60;  end
-                    4'd14: begin rs=9'd20;  gs=-9'd20; bs=9'd80;  end
-                    4'd15: begin rs=-9'd30; gs=9'd50;  bs=-9'd30; end
-                    default: begin rs=0; gs=0; bs=0; end
-                endcase
-                r = ({1'b0,y}+rs > 255) ? 8'd255 : ({1'b0,y}+rs < 0) ? 8'd0 : y+rs[7:0];
-                g = ({1'b0,y}+gs > 255) ? 8'd255 : ({1'b0,y}+gs < 0) ? 8'd0 : y+gs[7:0];
-                b = ({1'b0,y}+bs > 255) ? 8'd255 : ({1'b0,y}+bs < 0) ? 8'd0 : y+bs[7:0];
-            end
-            ted_rgb565 = {r[7:3], g[7:2], b[7:3]};
-        end
-    endfunction
-
-    // Framebuffer: capture TED output into a full-frame buffer, display via LCD.
-    // TED PAL: 456 pixels/line × 312 lines. Pixel clock = system_clk / 4.
-    // LCD: 480×272.
-
-    // Single framebuffer (512×312 × 16-bit).
+`ifdef SIMULATION
+    // Simulation: capture into framebuffer, read back via lcd_out timing
     reg [15:0] framebuf [0:512*312-1];
-
-    reg [8:0] prev_hcounter;
-    wire pixel_tick = (ted0.hcounter != prev_hcounter);
-    wire [17:0] fb_wr_addr = {ted0.videoline, ted0.hcounter};
+    reg [8:0] fb_x, fb_y;
+    reg c16_hsync_prev, c16_vsync_prev;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            prev_hcounter <= 0;
+            fb_x <= 0; fb_y <= 0;
+            c16_hsync_prev <= 1; c16_vsync_prev <= 1;
         end else begin
-            prev_hcounter <= ted0.hcounter;
-
-            if (pixel_tick && ted0.hcounter < 456 && ted0.videoline < 312)
-                framebuf[fb_wr_addr] <= ted_rgb565(ted_color);
+            c16_hsync_prev <= c16_hsync;
+            c16_vsync_prev <= c16_vsync;
+            if (!c16_hblank && !c16_vblank && c16_tick8) begin
+                if (fb_x < 400 && fb_y < 312)
+                    framebuf[{fb_y, fb_x}] <= c16_rgb565;
+                fb_x <= fb_x + 1;
+            end
+            if (c16_hblank && !c16_hsync_prev && c16_hsync) begin
+                fb_x <= 0;
+                fb_y <= fb_y + 1;
+            end
+            if (!c16_vsync && c16_vsync_prev)
+                fb_y <= 0;
         end
 
-    // LCD output
     wire [10:0] lcd_col, lcd_row;
+    lcd_out lcd0(
+        .clk(clk), .rst(rst),
+        .ctrl_addr(3'h0), .ctrl_data(11'h0), .ctrl_we(1'b0),
+        .lcd_hsync(lcd_hsync), .lcd_vsync(lcd_vsync), .lcd_de(lcd_de),
+        .row(lcd_row), .col(lcd_col)
+    );
+    wire [8:0] fb_rx = lcd_col[8:0] - 9'd52;
+    wire [8:0] fb_ry = lcd_row[8:0] + 9'd20;
+    wire in_fb = (fb_rx < 400) && (fb_ry < 312);
+    always @(posedge clk or negedge rst)
+        if (!rst) lcd_data <= 0;
+        else if (lcd_de) lcd_data <= in_fb ? framebuf[{fb_ry, fb_rx}] : 16'h0000;
 
+`else
+    // FPGA: line buffer + lcd_out for proper 480x272 LCD timing.
+    reg [15:0] linebuf_a [0:511];
+    reg [15:0] linebuf_b [0:511];
+    reg lb_sel;
+    reg [8:0] lb_wr_x;
+    reg c16_hs_prev;
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            lb_wr_x <= 0; lb_sel <= 0; c16_hs_prev <= 1;
+        end else begin
+            c16_hs_prev <= c16_hsync;
+            if (!c16_hblank && !c16_vblank && c16_tick8) begin
+                if (lb_wr_x < 400) begin
+                    if (!lb_sel) linebuf_a[lb_wr_x] <= c16_rgb565;
+                    else         linebuf_b[lb_wr_x] <= c16_rgb565;
+                end
+                lb_wr_x <= lb_wr_x + 1;
+            end
+            if (!c16_hs_prev && c16_hsync) begin
+                lb_wr_x <= 0;
+                lb_sel <= ~lb_sel;
+            end
+        end
+
+    wire [10:0] lcd_col, lcd_row;
     lcd_out lcd0(
         .clk(clk), .rst(rst),
         .ctrl_addr(3'h0), .ctrl_data(11'h0), .ctrl_we(1'b0),
@@ -382,66 +199,179 @@ module soc(
         .row(lcd_row), .col(lcd_col)
     );
 
-    assign lcd_pwm = 1'b1;
-    assign lcd_clk = clk;
-
-    // Map LCD (480×272) to TED framebuffer (456×312)
-    // Center horizontally: LCD col 0-479 → TED col 0-455 (scale ~0.95, just crop edges)
-    // Vertically: LCD row 0-271 → TED row 20-291 (skip top 20 lines of border)
-    wire [8:0] fb_x = lcd_col[8:0];
-    wire [8:0] fb_y = lcd_row[8:0] + 9'd20;
-    wire in_fb = (fb_x < 456) && (fb_y < 312);
+    wire [8:0] rd_x = lcd_col[8:0] - 9'd52;
+    wire rd_valid = (rd_x < 400) && (lcd_row < 272);
+    wire [15:0] rd_data = lb_sel ? linebuf_a[rd_x] : linebuf_b[rd_x];
 
     always @(posedge clk or negedge rst)
-        if (!rst)
-            lcd_data <= 0;
-        else if (lcd_de)
-            lcd_data <= in_fb ? framebuf[{fb_y, fb_x}] : 16'h0000;
+        if (!rst) lcd_data <= 0;
+        else if (lcd_de) lcd_data <= rd_valid ? rd_data : 16'h0000;
+`endif
 
     // ================================================================
-    //  Debug + misc
+    //  Keyboard: UART ASCII -> PS/2 scan codes for c16_keymatrix
     // ================================================================
-    reg [31:0] frame_count;
-    reg ted_vsync_prev;
+    wire uart_rx_raw;
+    wire [7:0] uart_rx_data;
+    uart uart_kb(
+        .clk(clk), .rst(rst),
+        .rx(rx), .rxdata(uart_rx_data), .rxen(uart_rx_raw),
+        .txdata(8'd0), .txen(1'b0), .tx(), .txbusy()
+    );
+    reg uart_rx_prev;
+    always @(posedge clk) uart_rx_prev <= uart_rx_raw;
+    wire uart_rx_valid = uart_rx_raw ^ uart_rx_prev;
+
+    // Pending register: hold UART byte until state machine is ready
+    reg [7:0] pend_char;
+    reg pend_valid;
     always @(posedge clk or negedge rst)
-        if (!rst) begin frame_count <= 0; ted_vsync_prev <= 1; end
-        else begin
-            ted_vsync_prev <= ted_vsync;
-            if (!ted_vsync && ted_vsync_prev) frame_count <= frame_count + 1;
-        end
+        if (!rst) begin pend_char <= 0; pend_valid <= 0; end
+        else if (uart_rx_valid) begin pend_char <= uart_rx_data; pend_valid <= 1; end
+        else if (pend_valid && key_state == 0) pend_valid <= 0;
 
-`ifdef SIMULATION
-    reg [31:0] dbg_cycle;
+    // Pending char's PS/2 code
+    reg [7:0] pend_ps2;
+    reg pend_shift;
+    always @* begin
+        pend_shift = 0;
+        case (pend_char)
+            8'h22: pend_shift = 1;  // " needs shift+2
+            default: pend_shift = 0;
+        endcase
+        case (pend_char | 8'h20)
+            "a": pend_ps2 = 8'h1C; "b": pend_ps2 = 8'h32; "c": pend_ps2 = 8'h21;
+            "d": pend_ps2 = 8'h23; "e": pend_ps2 = 8'h24; "f": pend_ps2 = 8'h2B;
+            "g": pend_ps2 = 8'h34; "h": pend_ps2 = 8'h33; "i": pend_ps2 = 8'h43;
+            "j": pend_ps2 = 8'h3B; "k": pend_ps2 = 8'h42; "l": pend_ps2 = 8'h4B;
+            "m": pend_ps2 = 8'h3A; "n": pend_ps2 = 8'h31; "o": pend_ps2 = 8'h44;
+            "p": pend_ps2 = 8'h4D; "q": pend_ps2 = 8'h15; "r": pend_ps2 = 8'h2D;
+            "s": pend_ps2 = 8'h1B; "t": pend_ps2 = 8'h2C; "u": pend_ps2 = 8'h3C;
+            "v": pend_ps2 = 8'h2A; "w": pend_ps2 = 8'h1D; "x": pend_ps2 = 8'h22;
+            "y": pend_ps2 = 8'h35; "z": pend_ps2 = 8'h1A;
+            default: begin
+                case (pend_char)
+                    "0": pend_ps2 = 8'h45; "1": pend_ps2 = 8'h16; "2": pend_ps2 = 8'h1E;
+                    "3": pend_ps2 = 8'h26; "4": pend_ps2 = 8'h25; "5": pend_ps2 = 8'h2E;
+                    "6": pend_ps2 = 8'h36; "7": pend_ps2 = 8'h3D; "8": pend_ps2 = 8'h3E;
+                    "9": pend_ps2 = 8'h46;
+                    8'h0D: pend_ps2 = 8'h5A;
+                    " ":  pend_ps2 = 8'h29;
+                    8'h08, 8'h7F: pend_ps2 = 8'h66;
+                    ",": pend_ps2 = 8'h41; ".": pend_ps2 = 8'h49;
+                    "-": pend_ps2 = 8'h4E; "+": pend_ps2 = 8'h55;
+                    "/": pend_ps2 = 8'h4A; "*": pend_ps2 = 8'h5B;
+                    ":": pend_ps2 = 8'h4C; ";": pend_ps2 = 8'h52;
+                    "=": pend_ps2 = 8'h5D; "@": pend_ps2 = 8'h54;
+                    8'h22: pend_ps2 = 8'h1E;  // " = shift+2
+                    default: pend_ps2 = 8'h00;
+                endcase
+            end
+        endcase
+    end
+
+    // State machine: send make code, wait, send break (F0 + code)
+    reg key_strobe;
+    reg [7:0] key_scancode;
+    reg [2:0] key_state;
+    reg [19:0] key_timer;
+    reg [7:0] key_saved_code;
+    reg key_saved_shift;
+
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            dbg_cycle <= 0; txen <= 0; txdata <= 0; led1 <= 0; led2 <= 0;
+            key_strobe <= 0; key_scancode <= 0;
+            key_state <= 0; key_timer <= 0;
+            key_saved_code <= 0; key_saved_shift <= 0;
+        end else begin
+            key_strobe <= 0;
+            case (key_state)
+                0: if (pend_valid && pend_ps2 != 0) begin
+                    key_saved_code <= pend_ps2;
+                    key_saved_shift <= pend_shift;
+                    if (pend_shift) begin
+                        key_scancode <= 8'h12; // SHIFT make
+                        key_strobe <= 1;
+                        key_state <= 1;
+                        key_timer <= 20'd5000;
+                    end else begin
+                        key_scancode <= pend_ps2; // key make
+                        key_strobe <= 1;
+                        key_state <= 3;
+                        key_timer <= 20'd700000; // hold ~25ms
+                    end
+                end
+                1: begin // wait then send key make
+                    if (key_timer == 0) begin
+                        key_scancode <= key_saved_code;
+                        key_strobe <= 1;
+                        key_state <= 3;
+                        key_timer <= 20'd500000;
+                    end else key_timer <= key_timer - 1;
+                end
+                3: begin // wait then send F0 (break prefix)
+                    if (key_timer == 0) begin
+                        key_scancode <= 8'hF0;
+                        key_strobe <= 1;
+                        key_state <= 4;
+                        key_timer <= 20'd5000;
+                    end else key_timer <= key_timer - 1;
+                end
+                4: begin // wait then send key break code
+                    if (key_timer == 0) begin
+                        key_scancode <= key_saved_code;
+                        key_strobe <= 1;
+                        if (key_saved_shift)
+                            key_state <= 5;
+                        else
+                            key_state <= 7;
+                        key_timer <= 20'd5000;
+                    end else key_timer <= key_timer - 1;
+                end
+                5: begin // send F0 for shift release
+                    if (key_timer == 0) begin
+                        key_scancode <= 8'hF0;
+                        key_strobe <= 1;
+                        key_state <= 6;
+                        key_timer <= 20'd5000;
+                    end else key_timer <= key_timer - 1;
+                end
+                6: begin // send shift break code
+                    if (key_timer == 0) begin
+                        key_scancode <= 8'h12;
+                        key_strobe <= 1;
+                        key_state <= 7;
+                        key_timer <= 20'd100000;
+                    end else key_timer <= key_timer - 1;
+                end
+                7: begin // cooldown
+                    if (key_timer == 0)
+                        key_state <= 0;
+                    else key_timer <= key_timer - 1;
+                end
+            endcase
+        end
+
+    // ================================================================
+    //  Misc
+    // ================================================================
+`ifdef SIMULATION
+    reg [31:0] dbg_cycle;
+    reg c16_vs_prev;
+    reg [31:0] frame_count;
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            led1 <= 0; led2 <= 0; dbg_cycle <= 0;
+            c16_vs_prev <= 1; frame_count <= 0;
         end else begin
             dbg_cycle <= dbg_cycle + 1;
-            // Track vsync edges and frame count
-            if (!ted_vsync && ted_vsync_prev)
-                $display("cyc=%0d VSYNC_FALL fc=%0d", dbg_cycle, frame_count);
-            if (ted_vsync && !ted_vsync_prev && dbg_cycle < 5000000)
-                $display("cyc=%0d VSYNC_RISE", dbg_cycle);
-            // DEBUG: Watch 16 pixels at hcounter=100-115, videoline=50 across frames 5-8
-            // Search for "COMMODORE" pattern ($03 $0F $0D $0D $0F) in RAM
-            // Check every 1KB boundary
-            if (frame_count == 100 && !ted_vsync && ted_vsync_prev) begin
-                for (i = 0; i < 64; i = i + 1) begin
-                    if (main_ram[{i[5:0], 10'd0}] == 8'h03 &&
-                        main_ram[{i[5:0], 10'd1}] == 8'h0F &&
-                        main_ram[{i[5:0], 10'd2}] == 8'h0D)
-                        $display("FOUND at $%04x: %02x %02x %02x %02x",
-                            {i[5:0], 10'd0},
-                            main_ram[{i[5:0], 10'd0}], main_ram[{i[5:0], 10'd1}],
-                            main_ram[{i[5:0], 10'd2}], main_ram[{i[5:0], 10'd3}]);
-                end
-            end
+            c16_vs_prev <= c16_vsync;
+            if (!c16_vsync && c16_vs_prev)
+                frame_count <= frame_count + 1;
         end
 `else
     always @(posedge clk or negedge rst)
-        if (!rst) begin
-            txen <= 0; txdata <= 0; led1 <= 0; led2 <= 0;
-        end
+        if (!rst) begin led1 <= 0; led2 <= 0; end
 `endif
 
 endmodule

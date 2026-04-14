@@ -7,7 +7,7 @@ module soc(
     output reg led1,
     output reg led2,
     input rx,
-    output tx,
+    output wire tx,
     input [4:0] joy,  // active-low joystick: up,down,left,right,fire
     output lcd_hsync,
     output lcd_vsync,
@@ -37,7 +37,7 @@ module soc(
     wire [15:0] ram_addr = {c16_a, ram_row};
     reg [7:0] ram_dout;
 
-    reg [7:0] ram [0:65535];
+    reg [7:0] ram [0:16383];  // C16 has 16KB RAM
 
 `ifdef GAME_PRG
     // Game ROM shadow: loaded from game.hex, copied to RAM on trigger
@@ -47,11 +47,13 @@ module soc(
     initial $readmemh("../roms/game.hex", game_rom);
 `endif
 
+    wire [13:0] ram_addr14 = ram_addr[13:0];  // 16KB address space
+
     always @(posedge clk) begin
         if (c16_ras) ram_row <= c16_a;   // latch low byte while RAS high (mux=1)
         if (!c16_cas && !c16_rw)         // write on CAS when RW=0
-            ram[ram_addr] <= c16_dout;
-        ram_dout <= ram[ram_addr];        // always read
+            ram[ram_addr14] <= c16_dout;
+        ram_dout <= ram[ram_addr14];      // always read
 
 `ifdef GAME_PRG
         // Trigger: detect CPU write to $FD3D via reconstructed address
@@ -62,7 +64,7 @@ module soc(
         if (game_copy_pending) begin
             game_copy_pending <= 0;
             for (integer i = GAME_START; i <= GAME_END; i = i + 1)
-                ram[i] <= game_rom[i];
+                ram[i[13:0]] <= game_rom[i];
         end
 `endif
     end
@@ -108,7 +110,7 @@ module soc(
         .basic_dl_write(1'b0),
         .PAL(c16_pal),
         .RS232_RX(1'b1),  // idle; keyboard uses separate UART
-        .RS232_TX(tx),
+        .RS232_TX(),      // disconnected; tx driven by uart_kb echo
         .RS232_DCD(1'b1),
         .RS232_DSR(1'b1),
         .sim_key_strobe(key_strobe),
@@ -117,13 +119,17 @@ module soc(
     );
 
     // ================================================================
-    //  Video: C16 RGB444 → framebuffer → LCD
+    //  Video
     // ================================================================
-    // Capture framebuffer at the TED's pixel clock (tick8, exactly 1 sample/pixel).
+    wire [15:0] c16_rgb565 = {c16_r, c16_r[3], c16_g, c16_g[3:2], c16_b, c16_b[3]};
+    assign lcd_pwm = 1'b1;
+    assign lcd_clk = clk;
+
+`ifdef SIMULATION
+    // Simulation: capture into framebuffer, read back via lcd_out timing
     reg [15:0] framebuf [0:512*312-1];
     reg [8:0] fb_x, fb_y;
     reg c16_hsync_prev, c16_vsync_prev;
-    wire [15:0] c16_rgb565 = {c16_r, c16_r[3], c16_g, c16_g[3:2], c16_b, c16_b[3]};
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
@@ -132,23 +138,19 @@ module soc(
         end else begin
             c16_hsync_prev <= c16_hsync;
             c16_vsync_prev <= c16_vsync;
-
             if (!c16_hblank && !c16_vblank && c16_tick8) begin
                 if (fb_x < 400 && fb_y < 312)
                     framebuf[{fb_y, fb_x}] <= c16_rgb565;
                 fb_x <= fb_x + 1;
             end
-
             if (c16_hblank && !c16_hsync_prev && c16_hsync) begin
                 fb_x <= 0;
                 fb_y <= fb_y + 1;
             end
-
             if (!c16_vsync && c16_vsync_prev)
                 fb_y <= 0;
         end
 
-    // LCD output (480x272)
     wire [10:0] lcd_col, lcd_row;
     lcd_out lcd0(
         .clk(clk), .rst(rst),
@@ -156,34 +158,128 @@ module soc(
         .lcd_hsync(lcd_hsync), .lcd_vsync(lcd_vsync), .lcd_de(lcd_de),
         .row(lcd_row), .col(lcd_col)
     );
-    assign lcd_pwm = 1'b1;
-    assign lcd_clk = clk;
-
-    // Display framebuffer 1:1 centered (480 LCD - ~375 content = ~52px each side)
     wire [8:0] fb_rx = lcd_col[8:0] - 9'd52;
     wire [8:0] fb_ry = lcd_row[8:0] + 9'd20;
     wire in_fb = (fb_rx < 400) && (fb_ry < 312);
+    always @(posedge clk or negedge rst)
+        if (!rst) lcd_data <= 0;
+        else if (lcd_de) lcd_data <= in_fb ? framebuf[{fb_ry, fb_rx}] : 16'h0000;
+
+`else
+    // FPGA: line buffer with LCD timing locked to TED sync.
+    // One DP16KD BRAM (1024x16, ping-pong halves).
+    // TED writes at tick8 rate; LCD reads back twice per TED line (line doubling).
+    // LCD hsync/vsync derived from TED sync → no rolling.
+    reg [15:0] lbram [0:1023];
+    reg [15:0] lbram_rd;
+    reg lb_half;
+    reg [8:0] lb_wr_x;
+    reg fpga_hs_prev, fpga_vs_prev;
+
+    // Write port: TED fills line buffer
+    always @(posedge clk)
+        if (!c16_hblank && !c16_vblank && c16_tick8 && lb_wr_x < 400)
+            lbram[{lb_half, lb_wr_x}] <= c16_rgb565;
 
     always @(posedge clk or negedge rst)
-        if (!rst)
-            lcd_data <= 0;
-        else if (lcd_de)
-            lcd_data <= in_fb ? framebuf[{fb_ry, fb_rx}] : 16'h0000;
+        if (!rst) begin
+            lb_wr_x <= 0; lb_half <= 0; fpga_hs_prev <= 1; fpga_vs_prev <= 1;
+        end else begin
+            fpga_hs_prev <= c16_hsync;
+            fpga_vs_prev <= c16_vsync;
+            if (!c16_hblank && !c16_vblank && c16_tick8)
+                lb_wr_x <= lb_wr_x + 1;
+            if (!fpga_hs_prev && c16_hsync) begin
+                lb_wr_x <= 0;
+                lb_half <= ~lb_half;
+            end
+        end
+
+    // LCD timing generator locked to TED.
+    // One LCD line per TED line (1824 clocks). 480 active pixels + blanking.
+    // Vertical: 272 active lines, frame locked to TED vsync.
+    localparam LCD_HTOTAL = 1824;
+    localparam LCD_HACTIVE = 480;
+    localparam LCD_HFP = 20;   // front porch
+    localparam LCD_HPW = 40;   // hsync pulse width
+
+    reg [10:0] lh_cnt;         // LCD horizontal counter (0..1823)
+    reg [8:0] lv_cnt;          // LCD vertical line counter
+    reg [8:0] ted_line;        // TED line counter (for vertical crop)
+    reg lcd_hs_r, lcd_vs_r, lcd_de_r;
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            lh_cnt <= 0; lv_cnt <= 0; ted_line <= 0;
+            lcd_hs_r <= 1; lcd_vs_r <= 1; lcd_de_r <= 0;
+        end else begin
+            // Horizontal counter: free-run, reset on TED hsync
+            if (!fpga_hs_prev && c16_hsync)
+                lh_cnt <= 0;
+            else if (lh_cnt == LCD_HTOTAL - 1)
+                lh_cnt <= 0;
+            else
+                lh_cnt <= lh_cnt + 1;
+
+            // TED line counter for vertical cropping
+            if (!fpga_hs_prev && c16_hsync)
+                ted_line <= ted_line + 1;
+            if (!c16_vsync && fpga_vs_prev)
+                ted_line <= 0;
+
+            // LCD vertical counter: increment every 2nd LCD line (= each TED line)
+            if (!fpga_hs_prev && c16_hsync)
+                lv_cnt <= lv_cnt + 1;
+            if (!c16_vsync && fpga_vs_prev)
+                lv_cnt <= 0;
+
+            // LCD signals
+            lcd_de_r <= (lh_cnt < LCD_HACTIVE) && (ted_line >= 20) && (ted_line < 292);
+            lcd_hs_r <= !((lh_cnt >= LCD_HACTIVE + LCD_HFP) &&
+                          (lh_cnt < LCD_HACTIVE + LCD_HFP + LCD_HPW));
+            lcd_vs_r <= c16_vsync;
+        end
+
+    assign lcd_hsync = lcd_hs_r;
+    assign lcd_vsync = lcd_vs_r;
+    assign lcd_de    = lcd_de_r;
+
+    // Read port: map LCD column to line buffer, centered
+    wire [8:0] rd_x = lh_cnt[8:0] - 9'd52;
+    always @(posedge clk)
+        lbram_rd <= lbram[{~lb_half, rd_x}];
+
+    always @(posedge clk or negedge rst)
+        if (!rst) lcd_data <= 0;
+        else lcd_data <= lcd_de_r ? ((rd_x < 400) ? lbram_rd : 16'h0000) : 16'h0000;
+`endif
 
     // ================================================================
     //  Keyboard: UART ASCII → PS/2 scan codes for c16_keymatrix
     // ================================================================
     wire uart_rx_raw;
     wire [7:0] uart_rx_data;
+    wire uart_kb_tx;
+    reg [7:0] echo_data;
+    reg echo_en;
     uart uart_kb(
         .clk(clk), .rst(rst),
         .rx(rx), .rxdata(uart_rx_data), .rxen(uart_rx_raw),
-        .txdata(8'd0), .txen(1'b0), .tx(), .txbusy()
+        .txdata(echo_data), .txen(echo_en), .tx(uart_kb_tx), .txbusy()
     );
     // Detect any rxen toggle (rxen XORs on each received byte)
     reg uart_rx_prev;
     always @(posedge clk) uart_rx_prev <= uart_rx_raw;
     wire uart_rx_valid = uart_rx_raw ^ uart_rx_prev;
+
+    // Echo received byte back via UART TX (debug — remove when keyboard works)
+    assign tx = uart_kb_tx;
+    always @(posedge clk or negedge rst)
+        if (!rst) echo_en <= 0;
+        else if (uart_rx_valid) begin
+            echo_data <= uart_rx_data;
+            echo_en <= ~echo_en;
+        end
 
     // Pending register: hold UART byte until state machine is ready
     reg [7:0] pend_char;
@@ -191,128 +287,126 @@ module soc(
     always @(posedge clk or negedge rst)
         if (!rst) begin pend_char <= 0; pend_valid <= 0; end
         else if (uart_rx_valid) begin pend_char <= uart_rx_data; pend_valid <= 1; end
-        else if (pend_valid && key_state == 0) pend_valid <= 0;
+        else pend_valid <= 0;
 
     // Pending char's PS/2 code (re-decode from pend_char)
+    // NOTE: Use explicit 8-bit hex values, NOT string literals like "a".
+    // Yosys may widen string literals beyond 8 bits, causing case mismatches.
+    // Use uart_rx_data directly (not pend_char) so the lookup is valid
+    // on the same clock that uart_rx_valid fires.
     reg [7:0] pend_ps2;
     reg pend_shift;
     always @* begin
+        pend_ps2 = 8'h00;
         pend_shift = 0;
-        case (pend_char)
-            8'h22: pend_shift = 1;  // " needs shift+2 on C16
-            default: pend_shift = 0;
-        endcase
-        case (pend_char | 8'h20)
-            "a": pend_ps2 = 8'h1C; "b": pend_ps2 = 8'h32; "c": pend_ps2 = 8'h21;
-            "d": pend_ps2 = 8'h23; "e": pend_ps2 = 8'h24; "f": pend_ps2 = 8'h2B;
-            "g": pend_ps2 = 8'h34; "h": pend_ps2 = 8'h33; "i": pend_ps2 = 8'h43;
-            "j": pend_ps2 = 8'h3B; "k": pend_ps2 = 8'h42; "l": pend_ps2 = 8'h4B;
-            "m": pend_ps2 = 8'h3A; "n": pend_ps2 = 8'h31; "o": pend_ps2 = 8'h44;
-            "p": pend_ps2 = 8'h4D; "q": pend_ps2 = 8'h15; "r": pend_ps2 = 8'h2D;
-            "s": pend_ps2 = 8'h1B; "t": pend_ps2 = 8'h2C; "u": pend_ps2 = 8'h3C;
-            "v": pend_ps2 = 8'h2A; "w": pend_ps2 = 8'h1D; "x": pend_ps2 = 8'h22;
-            "y": pend_ps2 = 8'h35; "z": pend_ps2 = 8'h1A;
+        case (uart_rx_data | 8'h20)
+            8'h61: pend_ps2 = 8'h1C;  // a
+            8'h62: pend_ps2 = 8'h32;  // b
+            8'h63: pend_ps2 = 8'h21;  // c
+            8'h64: pend_ps2 = 8'h23;  // d
+            8'h65: pend_ps2 = 8'h24;  // e
+            8'h66: pend_ps2 = 8'h2B;  // f
+            8'h67: pend_ps2 = 8'h34;  // g
+            8'h68: pend_ps2 = 8'h33;  // h
+            8'h69: pend_ps2 = 8'h43;  // i
+            8'h6A: pend_ps2 = 8'h3B;  // j
+            8'h6B: pend_ps2 = 8'h42;  // k
+            8'h6C: pend_ps2 = 8'h4B;  // l
+            8'h6D: pend_ps2 = 8'h3A;  // m
+            8'h6E: pend_ps2 = 8'h31;  // n
+            8'h6F: pend_ps2 = 8'h44;  // o
+            8'h70: pend_ps2 = 8'h4D;  // p
+            8'h71: pend_ps2 = 8'h15;  // q
+            8'h72: pend_ps2 = 8'h2D;  // r
+            8'h73: pend_ps2 = 8'h1B;  // s
+            8'h74: pend_ps2 = 8'h2C;  // t
+            8'h75: pend_ps2 = 8'h3C;  // u
+            8'h76: pend_ps2 = 8'h2A;  // v
+            8'h77: pend_ps2 = 8'h1D;  // w
+            8'h78: pend_ps2 = 8'h22;  // x
+            8'h79: pend_ps2 = 8'h35;  // y
+            8'h7A: pend_ps2 = 8'h1A;  // z
             default: begin
-                case (pend_char)
-                    "0": pend_ps2 = 8'h45; "1": pend_ps2 = 8'h16; "2": pend_ps2 = 8'h1E;
-                    "3": pend_ps2 = 8'h26; "4": pend_ps2 = 8'h25; "5": pend_ps2 = 8'h2E;
-                    "6": pend_ps2 = 8'h36; "7": pend_ps2 = 8'h3D; "8": pend_ps2 = 8'h3E;
-                    "9": pend_ps2 = 8'h46;
-                    8'h0D: pend_ps2 = 8'h5A;
-                    " ":  pend_ps2 = 8'h29;
-                    8'h08, 8'h7F: pend_ps2 = 8'h66;
-                    ",": pend_ps2 = 8'h41; ".": pend_ps2 = 8'h49;
-                    "-": pend_ps2 = 8'h4E; "+": pend_ps2 = 8'h55;
-                    "/": pend_ps2 = 8'h4A; "*": pend_ps2 = 8'h5B;
-                    ":": pend_ps2 = 8'h4C; ";": pend_ps2 = 8'h52;
-                    "=": pend_ps2 = 8'h5D; "@": pend_ps2 = 8'h54;
-                    8'h22: pend_ps2 = 8'h1E;  // " = shift+2
+                case (uart_rx_data)
+                    8'h30: pend_ps2 = 8'h45;  // 0
+                    8'h31: pend_ps2 = 8'h16;  // 1
+                    8'h32: pend_ps2 = 8'h1E;  // 2
+                    8'h33: pend_ps2 = 8'h26;  // 3
+                    8'h34: pend_ps2 = 8'h25;  // 4
+                    8'h35: pend_ps2 = 8'h2E;  // 5
+                    8'h36: pend_ps2 = 8'h36;  // 6
+                    8'h37: pend_ps2 = 8'h3D;  // 7
+                    8'h38: pend_ps2 = 8'h3E;  // 8
+                    8'h39: pend_ps2 = 8'h46;  // 9
+                    8'h0D: pend_ps2 = 8'h5A;  // RETURN
+                    8'h20: pend_ps2 = 8'h29;  // SPACE
+                    8'h08: pend_ps2 = 8'h66;  // BACKSPACE
+                    8'h7F: pend_ps2 = 8'h66;  // DEL
+                    8'h2C: pend_ps2 = 8'h41;  // ,
+                    8'h2E: pend_ps2 = 8'h49;  // .
+                    8'h2D: pend_ps2 = 8'h4E;  // -
+                    8'h2B: pend_ps2 = 8'h55;  // +
+                    8'h2F: pend_ps2 = 8'h4A;  // /
+                    8'h2A: pend_ps2 = 8'h5B;  // *
+                    8'h3A: pend_ps2 = 8'h4C;  // :
+                    8'h3B: pend_ps2 = 8'h52;  // ;
+                    8'h3D: pend_ps2 = 8'h5D;  // =
+                    8'h40: pend_ps2 = 8'h54;  // @
+                    8'h22: begin pend_ps2 = 8'h1E; pend_shift = 1; end  // " = shift+2
                     default: pend_ps2 = 8'h00;
                 endcase
             end
         endcase
     end
 
-    // State machine: send make code, wait, send break (F0 + code)
+    // Key press state machine: make code → wait → F0 → break code
+    // Simple counter approach (no case statement — avoids yosys optimization issues)
+    reg [19:0] key_counter;
+    reg [7:0] key_code;
     reg key_strobe;
     reg [7:0] key_scancode;
-    reg [2:0] key_state;
-    reg [19:0] key_timer;
-    reg [7:0] key_saved_code;
-    reg key_saved_shift;
+
+    localparam KEY_IDLE     = 0;
+    localparam KEY_HOLD     = 1;       // after make, count down
+    localparam KEY_BREAK_F0 = 700001;  // send F0
+    localparam KEY_BREAK_GAP = 700002; // small gap
+    localparam KEY_BREAK_CODE = 705002; // send break code
+    localparam KEY_DONE    = 705003;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            key_strobe <= 0; key_scancode <= 0;
-            key_state <= 0; key_timer <= 0;
-            key_saved_code <= 0; key_saved_shift <= 0;
+            key_counter <= 0;
+            key_code <= 0;
+            key_strobe <= 0;
+            key_scancode <= 0;
         end else begin
             key_strobe <= 0;
-            case (key_state)
-                0: if (pend_valid && pend_ps2 != 0) begin
-                    key_saved_code <= pend_ps2;
-                    key_saved_shift <= pend_shift;
-                    if (pend_shift) begin
-                        key_scancode <= 8'h12; // SHIFT make
-                        key_strobe <= 1;
-                        key_state <= 1;
-                        key_timer <= 20'd5000;
-                    end else begin
-                        key_scancode <= pend_ps2; // key make
-                        key_strobe <= 1;
-                        key_state <= 3;
-                        key_timer <= 20'd700000; // hold ~25ms
-                    end
+
+            if (key_counter == KEY_IDLE) begin
+                // Idle: wait for UART byte
+                if (uart_rx_valid && pend_ps2 != 8'h00) begin
+                    key_code <= pend_ps2;
+                    key_scancode <= pend_ps2;
+                    key_strobe <= 1;
+                    key_counter <= KEY_HOLD;
                 end
-                1: begin // wait then send key make
-                    if (key_timer == 0) begin
-                        key_scancode <= key_saved_code;
-                        key_strobe <= 1;
-                        key_state <= 3;
-                        key_timer <= 20'd500000;
-                    end else key_timer <= key_timer - 1;
-                end
-                3: begin // wait then send F0 (break prefix)
-                    if (key_timer == 0) begin
-                        key_scancode <= 8'hF0;
-                        key_strobe <= 1;
-                        key_state <= 4;
-                        key_timer <= 20'd5000;
-                    end else key_timer <= key_timer - 1;
-                end
-                4: begin // wait then send key break code
-                    if (key_timer == 0) begin
-                        key_scancode <= key_saved_code;
-                        key_strobe <= 1;
-                        if (key_saved_shift)
-                            key_state <= 5;
-                        else
-                            key_state <= 7;
-                        key_timer <= 20'd5000;
-                    end else key_timer <= key_timer - 1;
-                end
-                5: begin // send F0 for shift release
-                    if (key_timer == 0) begin
-                        key_scancode <= 8'hF0;
-                        key_strobe <= 1;
-                        key_state <= 6;
-                        key_timer <= 20'd5000;
-                    end else key_timer <= key_timer - 1;
-                end
-                6: begin // send shift break code
-                    if (key_timer == 0) begin
-                        key_scancode <= 8'h12;
-                        key_strobe <= 1;
-                        key_state <= 7;
-                        key_timer <= 20'd100000;
-                    end else key_timer <= key_timer - 1;
-                end
-                7: begin // cooldown
-                    if (key_timer == 0)
-                        key_state <= 0;
-                    else key_timer <= key_timer - 1;
-                end
-            endcase
+            end else if (key_counter == KEY_BREAK_F0) begin
+                // Send F0 break prefix
+                key_scancode <= 8'hF0;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter == KEY_BREAK_CODE) begin
+                // Send break code
+                key_scancode <= key_code;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter >= KEY_DONE) begin
+                // Done, back to idle
+                key_counter <= KEY_IDLE;
+            end else begin
+                // Counting
+                key_counter <= key_counter + 1;
+            end
         end
 
     // ================================================================
@@ -340,8 +434,13 @@ module soc(
             end
         end
 `else
+    // FPGA debug: led1=UART rx, led2=key_strobe (now same as uart_rx_valid)
     always @(posedge clk or negedge rst)
         if (!rst) begin led1 <= 0; led2 <= 0; end
+        else begin
+            if (uart_rx_valid) led1 <= ~led1;
+            if (key_strobe)    led2 <= ~led2;
+        end
 `endif
 
 endmodule
