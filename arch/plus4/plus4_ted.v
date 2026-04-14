@@ -62,8 +62,12 @@ module plus4_ted(
     output reg [9:0] color_addr,
     input [7:0] color_data,
 
-    // Character ROM read port (1-cycle registered)
+    // Character/bitmap data read port (1-cycle registered)
+    // In text mode: 11-bit address into char ROM
+    // In bitmap mode: 16-bit address into main RAM
     output reg [10:0] char_addr,
+    output reg [15:0] bitmap_addr,
+    output bitmap_mode,
     input [7:0] char_data,
 
     // Video pixel output
@@ -77,6 +81,9 @@ module plus4_ted(
 
     // IRQ output
     output irq,
+
+    // Border color (RGB565, from $FF19)
+    output [15:0] border_color,
 
     // ROM banking
     output reg rom_enabled,
@@ -103,6 +110,8 @@ module plus4_ted(
 
     wire irq_active = |(irq_status[3:0] & irq_enable[3:0]);
     assign irq = irq_active;
+    assign border_color = ted_color(reg_19[3:0], reg_19[6:4]);
+    assign bitmap_mode = reg_06[5];
 
     // Video control
     reg [7:0] reg_06, reg_07;     // vertical/horizontal control
@@ -213,33 +222,72 @@ module plus4_ted(
 
     // TED has 16 colors × 8 luminance levels = 128 entries.
     // For simplicity, use a fixed 16-color palette (mid luminance).
+    // ── TED color: 16 chrominance × 8 luminance → RGB565 ───────────
+    // Palette values matched to real Plus/4 output.
+
     function [15:0] ted_color;
         input [3:0] color;
         input [2:0] luma;
+        reg [6:0] idx;
+        reg [7:0] r, g, b, y;
+        reg [8:0] rs, gs, bs;  // signed intermediate
         begin
-            case (color)
-                4'h0: ted_color = 16'h0000;  // black
-                4'h1: ted_color = {5'd31, 6'd63, 5'd31};  // white
-                4'h2: ted_color = {5'd28, 6'd8,  5'd8};   // red
-                4'h3: ted_color = {5'd4,  6'd56, 5'd24};  // cyan
-                4'h4: ted_color = {5'd24, 6'd8,  5'd28};  // purple
-                4'h5: ted_color = {5'd8,  6'd52, 5'd8};   // green
-                4'h6: ted_color = {5'd4,  6'd8,  5'd28};  // blue
-                4'h7: ted_color = {5'd28, 6'd56, 5'd8};   // yellow
-                4'h8: ted_color = {5'd24, 6'd24, 5'd4};   // orange
-                4'h9: ted_color = {5'd16, 6'd20, 5'd4};   // brown
-                4'hA: ted_color = {5'd24, 6'd40, 5'd24};  // yellow-green
-                4'hB: ted_color = {5'd28, 6'd20, 5'd20};  // pink
-                4'hC: ted_color = {5'd8,  6'd40, 5'd28};  // blue-green
-                4'hD: ted_color = {5'd12, 6'd20, 5'd28};  // light blue
-                4'hE: ted_color = {5'd12, 6'd12, 5'd28};  // dark blue
-                4'hF: ted_color = {5'd12, 6'd48, 5'd12};  // light green
+            // Luminance (Y) levels
+            case (luma)
+                3'd0: y = 8'd0;
+                3'd1: y = 8'd30;
+                3'd2: y = 8'd55;
+                3'd3: y = 8'd85;
+                3'd4: y = 8'd115;
+                3'd5: y = 8'd150;
+                3'd6: y = 8'd190;
+                3'd7: y = 8'd235;
             endcase
-            // Simple luminance scaling (shift toward white for higher luma)
-            if (luma > 4)
-                ted_color = ted_color | 16'h4208;  // brighten
+
+            if (color <= 4'd1) begin
+                // Achromatic: color 0 = black, color 1 = gray/white
+                r = (color == 4'd0) ? 8'd0 : y;
+                g = r; b = r;
+            end else begin
+                // Chromatic: add hue offsets to Y
+                // R/G/B offsets per hue (at unit saturation, signed*64)
+                case (color)
+                    //              R-off  G-off  B-off  (relative to Y, scaled)
+                    4'd2:  begin rs=9'd80;  gs=-9'd40; bs=-9'd50; end // red
+                    4'd3:  begin rs=-9'd60; gs=9'd30;  bs=9'd40;  end // cyan
+                    4'd4:  begin rs=9'd50;  gs=-9'd50; bs=9'd70;  end // purple
+                    4'd5:  begin rs=-9'd50; gs=9'd50;  bs=-9'd50; end // green
+                    4'd6:  begin rs=-9'd30; gs=-9'd30; bs=9'd90;  end // blue
+                    4'd7:  begin rs=9'd40;  gs=9'd40;  bs=-9'd70; end // yellow
+                    4'd8:  begin rs=9'd70;  gs=-9'd10; bs=-9'd60; end // orange
+                    4'd9:  begin rs=9'd50;  gs=-9'd10; bs=-9'd50; end // brown
+                    4'd10: begin rs=-9'd10; gs=9'd50;  bs=-9'd50; end // yel-green
+                    4'd11: begin rs=9'd60;  gs=-9'd40; bs=9'd10;  end // pink
+                    4'd12: begin rs=-9'd50; gs=9'd30;  bs=9'd10;  end // blue-green
+                    4'd13: begin rs=-9'd20; gs=-9'd10; bs=9'd60;  end // light blue
+                    4'd14: begin rs=9'd20;  gs=-9'd20; bs=9'd80;  end // blue-purple
+                    4'd15: begin rs=-9'd30; gs=9'd50;  bs=-9'd30; end // light green
+                    default: begin rs=9'd0; gs=9'd0; bs=9'd0; end
+                endcase
+
+                // Scale offsets by luminance and clamp
+                if ({1'b0, y} + rs > 9'd255) r = 8'd255;
+                else if ({1'b0, y} + rs < 9'd0) r = 8'd0;
+                else r = y + rs[7:0];
+
+                if ({1'b0, y} + gs > 9'd255) g = 8'd255;
+                else if ({1'b0, y} + gs < 9'd0) g = 8'd0;
+                else g = y + gs[7:0];
+
+                if ({1'b0, y} + bs > 9'd255) b = 8'd255;
+                else if ({1'b0, y} + bs < 9'd0) b = 8'd0;
+                else b = y + bs[7:0];
+            end
+
+            ted_color = {r[7:3], g[7:2], b[7:3]};
         end
     endfunction
+
 
     // ════════════════════════════════════════════════════════════════
     //  Video Pipeline (5-stage, same structure as PET)
@@ -264,9 +312,11 @@ module plus4_ted(
     wire [2:0] pixel_x = pet_x[2:0];
     wire [9:0] row_base = {char_row_v, 5'b0} + {2'b0, char_row_v, 3'b0};
 
-    // P0: register addresses
+    // P0: register addresses + capture bitmap addressing info
     reg p0_valid;
     reg [2:0] p0_pixel_x, p0_glyph_y;
+    reg [9:0] p0_row_base;
+    reg [5:0] p0_char_col;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
@@ -275,80 +325,115 @@ module plus4_ted(
             p0_valid    <= 0;
             p0_pixel_x  <= 0;
             p0_glyph_y  <= 0;
+            p0_row_base <= 0;
+            p0_char_col <= 0;
         end else begin
             screen_addr <= row_base + {4'b0, char_col_v};
             color_addr  <= row_base + {4'b0, char_col_v};
             p0_valid    <= in_window;
             p0_pixel_x  <= pixel_x;
             p0_glyph_y  <= glyph_y;
+            p0_row_base <= row_base;
+            p0_char_col <= char_col_v;
         end
 
     // P1: wait for screen/color RAM read
     reg p1_valid;
     reg [2:0] p1_pixel_x, p1_glyph_y;
+    reg [9:0] p1_row_base;
+    reg [5:0] p1_char_col;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            p1_valid <= 0; p1_pixel_x <= 0; p1_glyph_y <= 0;
+            p1_valid <= 0; p1_pixel_x <= 0; p1_glyph_y <= 0; p1_row_base <= 0; p1_char_col <= 0;
         end else begin
-            p1_valid   <= p0_valid;
-            p1_pixel_x <= p0_pixel_x;
-            p1_glyph_y <= p0_glyph_y;
+            p1_valid    <= p0_valid;
+            p1_pixel_x  <= p0_pixel_x;
+            p1_glyph_y  <= p0_glyph_y;
+            p1_row_base <= p0_row_base;
+            p1_char_col <= p0_char_col;
         end
 
     // P2: screen_data + color_data valid → compute char ROM addr
     reg p2_valid;
     reg [2:0] p2_pixel_x;
     reg [7:0] p2_color;
+    reg [7:0] p2_bg_attr;
     reg p2_reverse;
     reg p2_is_cursor;
+    reg p2_bitmap;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
             char_addr  <= 0;
+            bitmap_addr <= 0;
             p2_valid   <= 0;
             p2_pixel_x <= 0;
             p2_color   <= 0;
+            p2_bg_attr <= 0;
             p2_reverse <= 0;
             p2_is_cursor <= 0;
+            p2_bitmap  <= 0;
         end else begin
-            // Character ROM: use screen_data[6:0] as char index (128 chars)
-            // reg_13[2] selects upper/lower 1KB (character set)
-            // screen_data[7] = reverse video flag (handled at pixel output)
-            char_addr  <= {reg_13[2], screen_data[6:0], p1_glyph_y};
+            if (reg_06[5]) begin
+                // BITMAP MODE: read pixel data from main RAM
+                // bitmap_base = reg_12[5:3] * $2000
+                // bitmap_offset = (char_row * 40 + char_col) * 8 + glyph_y
+                //               = row_base * 8 + char_col * 8 + glyph_y (reuse p1 row_base)
+                bitmap_addr <= {reg_12[5:3], p1_row_base, 3'b0} + {8'b0, p1_char_col, p1_glyph_y};
+                // In bitmap mode: screen_data = bg color, color_data = fg color
+                p2_color   <= color_data;      // fg color (pixel=1)
+                p2_bg_attr <= screen_data;      // bg color (pixel=0)
+            end else begin
+                // TEXT MODE: look up character ROM
+                char_addr  <= {reg_13[2], screen_data[6:0], p1_glyph_y};
+                p2_color   <= color_data;
+                p2_bg_attr <= reg_15;           // bg from TED register
+            end
             p2_valid   <= p1_valid;
             p2_pixel_x <= p1_pixel_x;
-            p2_color   <= color_data;
-            p2_reverse <= screen_data[7];
+            p2_reverse <= reg_06[5] ? 1'b0 : screen_data[7];
             p2_is_cursor <= (char_row_v == cursor_row) && (char_col_v == cursor_col);
+            p2_bitmap  <= reg_06[5];
         end
 
     // P3: wait for char ROM read
     reg p3_valid;
     reg [2:0] p3_pixel_x;
     reg [7:0] p3_color;
+    reg [7:0] p3_bg_attr;
     reg p3_reverse;
     reg p3_is_cursor;
+    reg p3_bitmap;
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
-            p3_valid <= 0; p3_pixel_x <= 0; p3_color <= 0; p3_reverse <= 0; p3_is_cursor <= 0;
+            p3_valid <= 0; p3_pixel_x <= 0; p3_color <= 0; p3_bg_attr <= 0; p3_reverse <= 0; p3_is_cursor <= 0; p3_bitmap <= 0;
         end else begin
-            p3_valid   <= p2_valid;
-            p3_pixel_x <= p2_pixel_x;
-            p3_color   <= p2_color;
-            p3_reverse <= p2_reverse;
+            p3_valid     <= p2_valid;
+            p3_pixel_x   <= p2_pixel_x;
+            p3_color     <= p2_color;
+            p3_bg_attr   <= p2_bg_attr;
+            p3_reverse   <= p2_reverse;
             p3_is_cursor <= p2_is_cursor;
+            p3_bitmap    <= p2_bitmap;
         end
 
     // P4: char_data valid → select pixel, apply color
     wire glyph_bit_raw = char_data[3'd7 - p3_pixel_x];
     wire glyph_bit = p3_reverse ? ~glyph_bit_raw : glyph_bit_raw;
 
-    // Foreground: from color RAM (bits 0-3 = color, bits 4-6 = luminance)
-    wire [15:0] fg_color = ted_color(p3_color[3:0], p3_color[6:4]);
-    // Background: from TED register $FF15
-    wire [15:0] bg_color = ted_color(reg_15[3:0], reg_15[6:4]);
+    // Text mode:  fg from color RAM, bg from $FF15
+    // Bitmap mode: fg from $FF15 (register), bg = black
+    //              (per-cell attributes need split-screen support to work
+    //              properly with BASIC's text window; use register colors
+    //              for clean display)
+    wire [15:0] fg_color = p3_bitmap
+        ? ted_color(reg_15[3:0], reg_15[6:4])
+        : ted_color(p3_color[3:0], p3_color[6:4]);
+    wire [15:0] bg_color = p3_bitmap
+        ? 16'h0000
+        : ted_color(p3_bg_attr[3:0], p3_bg_attr[6:4]);
 
     // Cursor blink: show solid block at cursor position, toggling ~2Hz
     wire blink_phase = frame_cnt[4];
@@ -441,8 +526,10 @@ module plus4_ted(
 
             // ── New key from UART ──
             if (uart_rx_valid && map_valid) begin
+                for (i = 0; i < 8; i = i + 1)
+                    key_matrix[i] <= 8'h00;
                 key_matrix[map_row][map_col] <= 1'b1;
-                key_timer <= 18'd200000;  // hold key for >1 frame (~160K cycles)
+                key_timer <= 18'd200000;
             end
 
             // ── Register writes ──

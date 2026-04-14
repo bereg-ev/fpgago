@@ -84,75 +84,64 @@ run: all
 clean:
 	rm -rf obj_dir
 
-# ── Game support (.sna snapshots) ───────────────────────────────────────────
-# Users provide their own .sna files from Spectrum archives.
-# Recommended sources:
-#   spectrumcomputing.co.uk — largest archive, search and download
-#   worldofspectrum.net     — classic archive
+# ── Game catalog ────────────────────────────────────────────────────────────
+# Games auto-downloaded from spectrumcomputing.co.uk as .tzx/.tap, converted to .sna
+SC = https://spectrumcomputing.co.uk/pub/sinclair
+
+GAME_horace     = $(SC)/games/h/HungryHorace.tzx.zip|Hungry Horace - Pac-Man style maze
+GAME_chuckie    = $(SC)/games/c/ChuckieEgg.tzx.zip|Chuckie Egg - platform arcade
+GAME_boulder    = $(SC)/games/b/BoulderDash.tzx.zip|Boulder Dash - digging puzzle
+GAME_frogger    = $(SC)/games/f/Frogger.tzx.zip|Frogger - road crossing arcade
+GAME_trashman   = $(SC)/games/t/Trashman.tzx.zip|Trashman - dodge traffic
+GAME_penetrator = $(SC)/games/p/Penetrator.tzx.zip|Penetrator - Scramble-style shooter
+GAME_skool      = $(SC)/games/s/SkoolDaze.tzx.zip|Skool Daze - school simulation
+GAME_dizzy      = $(SC)/games/d/Dizzy.tzx.zip|Dizzy - puzzle platformer
 
 list-spectrum-games:
 	@echo ""
-	@echo "  ZX Spectrum Game Loader"
+	@echo "  Available ZX Spectrum games:"
 	@echo ""
-	@echo "  This loads .sna (48K snapshot) files into the Spectrum simulation."
-	@echo "  Download .sna files from: spectrumcomputing.co.uk"
-	@echo ""
-	@echo "  Flagship games to search for (save as <name>.sna):"
-	@echo "    dizzy              Dizzy - puzzle platformer"
-	@echo "    elite              Elite - space trading"
-	@echo "    horace             Hungry Horace - maze game"
-	@echo "    loderunner         Lode Runner - platform puzzler"
-	@echo "    manicminer         Manic Miner - platform classic"
-	@echo "    pacman             Pac-Man - arcade"
-	@echo "    saberwulf          Sabre Wulf - action adventure"
-	@echo "    tetris             Tetris - puzzle"
+	@echo "    horace         Hungry Horace - Pac-Man style maze"
+	@echo "    chuckie        Chuckie Egg - platform arcade"
+	@echo "    boulder        Boulder Dash - digging puzzle"
+	@echo "    frogger        Frogger - road crossing arcade"
+	@echo "    trashman       Trashman - dodge traffic"
+	@echo "    penetrator     Penetrator - Scramble-style shooter"
+	@echo "    skool          Skool Daze - school simulation"
+	@echo "    dizzy          Dizzy - puzzle platformer"
 	@echo ""
 	@echo "  Usage:"
-	@echo "    1. Download a .sna file and place it in arch/spectrum/roms/games/"
-	@echo "    2. make download-game ARCH=spectrum GAME=<filename>"
-	@echo "    3. make run-game ARCH=spectrum"
+	@echo "    make download-game ARCH=spectrum GAME=<name>"
+	@echo "    make run-game ARCH=spectrum GAME=<name>"
 	@echo ""
-	@if [ -d $(ROMS)/games ]; then \
-	    snaps=$$(ls $(ROMS)/games/*.sna 2>/dev/null); \
-	    if [ -n "$$snaps" ]; then \
-	        echo "  Already downloaded:"; \
-	        for f in $$snaps; do echo "    $$(basename $$f .sna)"; done; \
-	        echo ""; \
-	    fi; \
-	fi
 
-# Load a .sna file from the games directory
 download-spectrum-game:
-	@test -n "$(GAME)" || { echo "Usage: make load-sna ARCH=spectrum GAME=<name>"; exit 1; }
-	@mkdir -p $(ROMS)/games
-	@snafile="$(ROMS)/games/$(GAME).sna"; \
-	if [ ! -f "$$snafile" ]; then \
-	    echo ""; \
-	    echo "  File not found: $$snafile"; \
-	    echo ""; \
-	    echo "  Steps:"; \
-	    echo "    1. Go to: https://spectrumcomputing.co.uk"; \
-	    echo "    2. Search for '$(GAME)'"; \
-	    echo "    3. Download the .sna snapshot file"; \
-	    echo "    4. Save it as: arch/spectrum/roms/games/$(GAME).sna"; \
-	    echo "    5. Re-run: make download-game ARCH=spectrum GAME=$(GAME)"; \
-	    echo ""; \
-	    case "$$(uname -s)" in \
-	        Darwin) open "https://spectrumcomputing.co.uk/?search=$(GAME)" 2>/dev/null ;; \
-	        Linux)  xdg-open "https://spectrumcomputing.co.uk/?search=$(GAME)" 2>/dev/null ;; \
-	    esac; \
-	    exit 1; \
+	@test -n "$(GAME)" || { echo "Usage: make download-game ARCH=spectrum GAME=<name>"; echo "Run 'make list-games ARCH=spectrum'."; exit 1; }
+	@game_entry="$(GAME_$(GAME))"; \
+	if [ -z "$$game_entry" ]; then \
+	    echo "Error: unknown game '$(GAME)'. Run 'make list-games ARCH=spectrum'."; exit 1; \
 	fi; \
+	url=$$(echo "$$game_entry" | cut -d'|' -f1); \
+	desc=$$(echo "$$game_entry" | cut -d'|' -f2); \
 	echo ""; \
-	echo "  Converting .sna snapshot..."; \
-	python3 $(ROMS)/sna2hex.py "$$snafile" $(ROMS)/game.hex; \
+	echo "  Downloading: $$desc"; \
+	mkdir -p $(ROMS)/games; \
+	zipfile="$(ROMS)/games/$(GAME).tzx.zip"; \
+	curl -sfL -o "$$zipfile" "$$url" || { echo "  Error: download failed."; exit 1; }; \
+	echo "  Extracting..."; \
+	unzip -qo "$$zipfile" -d $(ROMS)/games/; \
+	tzxfile=$$(ls $(ROMS)/games/*.tzx $(ROMS)/games/*.tap 2>/dev/null | head -1); \
+	if [ -z "$$tzxfile" ]; then echo "  Error: no .tzx/.tap found in archive."; exit 1; fi; \
+	echo "  Converting to snapshot..."; \
+	python3 $(ROMS)/tzx2sna.py "$$tzxfile" $(ROMS)/games/$(GAME).sna; \
+	python3 $(ROMS)/sna2hex.py $(ROMS)/games/$(GAME).sna $(ROMS)/game.hex; \
 	echo ""; \
-	echo "  Done! Run with: make run-game ARCH=spectrum"; \
+	echo "  Done! Run with: make run-game ARCH=spectrum GAME=$(GAME)"; \
 	echo ""
 
 run-spectrum-game:
-	@test -f $(ROMS)/game.hex || { echo "No game loaded. Run 'make list-games ARCH=spectrum' for instructions."; exit 1; }
-	@echo "Building with .sna snapshot..."
+	@test -f $(ROMS)/game.hex || { echo "No game loaded. Run 'make download-game ARCH=spectrum GAME=<name>' first."; exit 1; }
+	@echo "Building with snapshot..."
 	@rm -rf obj_dir
 	verilator $(VFLAGS) -DGAME_SNA $(VSRCS) sim_top.cpp
 	@echo "Running game..."

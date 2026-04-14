@@ -80,7 +80,7 @@ help:
 	@printf "    make newgame  GAME=<name> ARCH=<arch>          Scaffold a new game\n"
 	@printf "    make delgame  GAME=<name>                      Delete a user-created game\n"
 	@printf "\n"
-	@printf "\033[32m  Retro Computers (ARCH=pet, spectrum):\033[0m\n"
+	@printf "\033[32m  Retro Computers (ARCH=pet, spectrum, c64):\033[0m\n"
 	@printf "    make download-rom  ARCH=<arch>                 Download firmware ROMs\n"
 	@printf "    make download-cpu  ARCH=<arch>                 Download CPU core (if needed)\n"
 	@printf "    make run           ARCH=<arch>                 Run retro computer simulation\n"
@@ -129,7 +129,7 @@ all-risc2: gcasm
 
 # ── Retro computers (unified ARCH= interface) ─────────────────────────────
 # Architectures with sim-desktop that run standalone (no GAME needed)
-RETRO_ARCHS = pet plus4 spectrum
+RETRO_ARCHS = pet plus4 c16 spectrum c64
 
 download-rom:
 	@test -n "$(ARCH)" || { echo "Usage: make download-rom ARCH=<arch>"; echo "Available: $(RETRO_ARCHS)"; exit 1; }
@@ -179,9 +179,9 @@ run:
 	@if [ -z "$(GAME)" ] && [ -n "$(ARCH)" ] && [ -d "arch/$(ARCH)/sim-desktop" ]; then \
 	    $(MAKE) -C arch/$(ARCH)/sim-desktop run; \
 	    exit 0; \
-	fi
-	@$(MAKE) build GAME=$(GAME) ARCH=$(ARCH) TARGET=$(TARGET)
-	@if [ "$(TARGET)" = "sdl2" ]; then \
+	fi; \
+	$(MAKE) build GAME=$(GAME) ARCH=$(ARCH) TARGET=$(TARGET); \
+	if [ "$(TARGET)" = "sdl2" ]; then \
 	    if [ -d "games/$(GAME)/src/platform/sdl2" ] && [ -f "games/$(GAME)/src/platform/sdl2/Makefile" ]; then \
 	        cd games/$(GAME)/src/platform/sdl2 && ./$(GAME)$(EXEEXT); \
 	    else \

@@ -85,3 +85,17 @@ arch/spectrum/roms/rom.hex
 arch/spectrum/roms/games/
 arch/spectrum/roms/game.hex
 arch/spectrum/roms/game_params.vh
+
+# C64 chip sources (downloaded, not committed) and ROM files
+arch/c64/vic/*.v
+arch/c64/vic/*.vh
+arch/c64/sid/*.sv
+arch/c64/sid/*.v
+arch/c64/cpu/mos6526.v
+arch/c64/roms/*.bin
+arch/c64/roms/*.hex
+arch/c64/roms/games/
+arch/c64/roms/*.d64
+arch/c64/roms/game.hex
+arch/c64/roms/game_params.vh
+arch/c64/roms/game.uart

@@ -184,8 +184,11 @@ module pet_keyboard(
             end
 
             if (uart_rx_valid && map_valid && map_row < 9) begin
+                // Clear all previous keys before pressing the new one
+                for (i = 0; i < 9; i = i + 1)
+                    key_matrix[i] <= 8'h00;
                 key_matrix[map_row][map_col] <= 1'b1;
-                key_timer <= 18'd200000;  // hold key for >1 frame
+                key_timer <= 18'd80000;  // hold for ~half a frame
             end
 
             cb1_prev <= cb1;

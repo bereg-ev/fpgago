@@ -24,10 +24,16 @@ module soc(
     output reg [15:0] lcd_data,
     output        lcd_de,
     output        lcd_vsync,
-    output        lcd_hsync,
-    output [7:0] dbg_tvflag,
-    output [7:0] dbg_flags
+    output        lcd_hsync
 );
+
+/* ── Game NMI signal (directly before CPU for forward declaration) ──── */
+`ifdef GAME_SNA
+reg game_nmi_active;
+wire game_nmi_n = ~game_nmi_active;
+`else
+wire game_nmi_n = 1'b1;
+`endif
 
 /* ── Z80 CPU (TV80) ───────────────────────────────────────────────────── */
 /* TV80s runs at full system clock speed. For simulation this is fine;
@@ -43,7 +49,7 @@ tv80s cpu(
     .reset_n(rst),
     .wait_n (1'b1),
     .int_n  (cpu_int_n),
-    .nmi_n  (1'b1),
+    .nmi_n  (game_nmi_n),
     .busrq_n(1'b1),
     .m1_n   (cpu_m1_n),
     .mreq_n (cpu_mreq_n),
@@ -62,19 +68,6 @@ tv80s cpu(
 reg [7:0] rom [0:16383];
 initial $readmemh("../roms/rom.hex", rom);
 
-`ifdef GAME_SNA
-/* When loading a .sna snapshot, patch ROM reset vector to jump directly
- * to the game's entry point, bypassing ROM initialization.
- * Z80 JP instruction: $C3 lo hi */
-`include "../roms/game_params.vh"
-initial begin
-    rom[0] = 8'hF3;              // DI
-    rom[1] = 8'hC3;              // JP GAME_PC
-    rom[2] = GAME_PC[7:0];
-    rom[3] = GAME_PC[15:8];
-end
-`endif
-
 wire [7:0] rom_data = rom[cpu_addr[13:0]];
 
 /* ── RAM (48 KB at $4000-$FFFF) ────────────────────────────────────────── */
@@ -82,56 +75,89 @@ reg [7:0] ram [0:49151];
 
 integer init_i;
 initial begin
-`ifdef GAME_SNA
-    /* Load snapshot RAM */
-    $readmemh("../roms/game.hex", ram);
-`else
-    /* Default: clear RAM, set attributes to black-on-white */
     for (init_i = 0; init_i < 49152; init_i = init_i + 1)
         ram[init_i] = 8'h00;
     for (init_i = 16'h1800; init_i < 16'h1B00; init_i = init_i + 1)
         ram[init_i] = 8'h38;
-`endif
 end
 
 wire [15:0] ram_offset = cpu_addr - 16'h4000;
 wire [7:0]  ram_data   = ram[ram_offset];
 
-/* ── TV_FLAG bit 5 auto-clear ──────────────────────────────────────────── */
-/* The ROM sets TV_FLAG bit 5 at $129C during boot to signal "lower screen
- * needs clearing." This bit is normally cleared by CLS-LOWER, which only
- * runs when a key is pressed (FLAGS bit 5 set). On real hardware, keyboard
- * matrix noise triggers a spurious key detection that clears it. In our
- * clean simulation, no noise occurs, so TV_FLAG bit 5 stays set forever,
- * preventing the cursor from appearing.
- * Fix: detect when TV_FLAG bit 5 is set and no key has been pressed for
- * several frames, then clear it — simulating the effect of CLS-LOWER. */
-reg [20:0] tvflag5_cnt;
-reg        tvflag5_done;
+`ifdef GAME_SNA
+/* ── Game loader: shadow ROM + post-boot bulk copy ─────────────────────── */
+/* Game data stored in shadow array. After ROM boot completes (S_POSN set),
+ * the game is bulk-copied into RAM at hardware speed, then the CPU is
+ * redirected to the game's entry point via a trampoline at $FF00. */
+`include "../roms/game_params.vh"
 
+reg [7:0] game_shadow [0:49151];
+initial $readmemh("../roms/game.hex", game_shadow);
+
+reg [2:0]  game_state;     // 0=wait_boot, 1=copying, 2=trampoline, 3=nmi, 4=done
+reg [15:0] game_copy_addr;
+reg [15:0] game_nmi_cnt;
+wire [15:0] s_posn_val = {ram[16'h1C89], ram[16'h1C88]};
+
+always @(posedge clk) begin
+    if (!rst) begin
+        game_state      <= 0;
+        game_copy_addr  <= 0;
+        game_nmi_active <= 0;
+        game_nmi_cnt    <= 0;
+    end else begin
+        case (game_state)
+            0: begin
+                /* Normal CPU writes during boot */
+                if (!cpu_mreq_n && !cpu_wr_n && cpu_addr >= 16'h4000)
+                    ram[ram_offset] <= cpu_data_out;
+                /* Wait for ROM boot to complete */
+                if (s_posn_val == 16'h1821) begin
+                    game_state     <= 1;
+                    game_copy_addr <= 0;
+                end
+            end
+            1: begin
+                /* Bulk copy: 1 byte per clock, full 48K */
+                ram[game_copy_addr] <= game_shadow[game_copy_addr];
+                game_copy_addr <= game_copy_addr + 1;
+                if (game_copy_addr == 16'hBFFF)
+                    game_state <= 2;
+            end
+            2: begin
+                /* Write trampoline at $FF00 and set NMIADD to point to it. */
+                ram[16'hBF00] <= 8'hF3;          // $FF00: DI
+                ram[16'hBF01] <= 8'hC3;          // $FF01: JP GAME_PC
+                ram[16'hBF02] <= GAME_PC[7:0];   // $FF02: lo
+                ram[16'hBF03] <= GAME_PC[15:8];  // $FF03: hi
+                /* NMIADD at $5CB0 = RAM offset $1CB0 → point to $FF00 */
+                ram[16'h1CB0] <= 8'h00;          // NMIADD lo = $00
+                ram[16'h1CB1] <= 8'hFF;          // NMIADD hi = $FF
+                game_state <= 3;
+            end
+            3: begin
+                /* Trigger NMI pulse */
+                game_nmi_active <= 1;
+                game_nmi_cnt <= game_nmi_cnt + 1;
+                if (game_nmi_cnt > 100) begin
+                    game_nmi_active <= 0;
+                    game_state <= 4;
+                end
+            end
+            default: begin
+                /* Game running — normal CPU writes */
+                if (!cpu_mreq_n && !cpu_wr_n && cpu_addr >= 16'h4000)
+                    ram[ram_offset] <= cpu_data_out;
+            end
+        endcase
+    end
+end
+`else
 always @(posedge clk) begin
     if (rst && !cpu_mreq_n && !cpu_wr_n && cpu_addr >= 16'h4000)
         ram[ram_offset] <= cpu_data_out;
-
-    /* Auto-clear TV_FLAG bit 5 if it stays set too long without a key press.
-     * On real hardware, keyboard noise clears this via CLS-LOWER. */
-    if (rst && !tvflag5_done) begin
-        if (ram[16'h1C3C][5])
-            tvflag5_cnt <= tvflag5_cnt + 1;
-        else
-            tvflag5_cnt <= 0;
-
-        if (tvflag5_cnt > 21'd1500000) begin   // ~30ms stuck -> clear it
-            ram[16'h1C3C] <= ram[16'h1C3C] & 8'hDF;
-            tvflag5_done <= 1;
-        end
-    end
-
-    if (!rst) begin
-        tvflag5_cnt  <= 0;
-        tvflag5_done <= 0;
-    end
 end
+`endif
 
 /* ── LCD timing generator ──────────────────────────────────────────────── */
 wire [10:0] lcd_col, lcd_row;
@@ -187,11 +213,7 @@ always @(posedge clk) begin
 end
 
 /* Colour palette — combinational lookup */
-`ifdef GAME_SNA
-reg [2:0] border_color = GAME_BORDER;
-`else
 reg [2:0] border_color = 3'b111;
-`endif
 
 reg [15:0] pal_out;
 always @(*) begin
@@ -325,7 +347,4 @@ end
 /* S_POSN at $5C88: col (33-col), $5C89: line (24-line)
  * After boot: should be something like (33,2) for the input line */
 /* Debug: check both screen RAM and system variables */
-assign dbg_tvflag = ram[16'h1C3C];  // TV_FLAG at $5C3C
-assign dbg_flags  = ram[16'h1C3B];  // FLAGS at $5C3B
-
 endmodule

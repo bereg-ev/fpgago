@@ -174,9 +174,9 @@ static void autotype_tick()
     uart_queue.push(ch);
 
     if (ch == 0x0Du)
-        autotype_delay = 15;   /* wait 15 frames after RETURN (line processing) */
+        autotype_delay = 20;   /* wait 20 frames after RETURN (line tokenization) */
     else
-        autotype_delay = 2;    /* wait 2 frames between characters */
+        autotype_delay = 3;    /* wait 3 frames between characters (debounce) */
 }
 
 /* ── main ──────────────────────────────────────────────────────────── */

@@ -196,6 +196,7 @@ run-pet-game:
 	elif [ "$$fmt" = "bas" ]; then \
 	    test -f $(ROMS)/game.uart || { echo "Run 'make download-game ARCH=pet GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building PET simulation..."; \
+	    rm -rf obj_dir; \
 	    $(MAKE) all; \
 	    echo "Running $(GAME) (auto-typing BASIC source)..."; \
 	    ./obj_dir/Vsoc --autotype $(ROMS)/game.uart; \

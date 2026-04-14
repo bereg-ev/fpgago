@@ -30,17 +30,22 @@ def convert(infile, hexfile, uartfile):
     paramfile = hexfile.replace('.hex', '_params.vh')
     end_addr = load_addr + len(program) - 1
     with open(paramfile, 'w') as f:
-        f.write(f'localparam [14:0] GAME_START = 15\'h{load_addr:04x};\n')
-        f.write(f'localparam [14:0] GAME_END   = 15\'h{end_addr:04x};\n')
+        f.write(f'localparam [15:0] GAME_START = 16\'h{load_addr:04x};\n')
+        f.write(f'localparam [15:0] GAME_END   = 16\'h{end_addr:04x};\n')
 
     print(f'  {infile}: {len(program)} bytes at ${load_addr:04X}-${end_addr:04X} -> {hexfile}')
 
     # Generate autorun:
-    #   poke59632,1  — writes to $E8F0, triggers hardware game copy
-    #   run          — starts the game after copy completes
-    # (59632 = 0xE8F0, the game-load trigger I/O address)
+    #   poke64829,1  — writes to $FD3D, triggers hardware game copy
+    #   poke45,lo:poke46,hi  — set BASIC end-of-variables pointer ($2D/$2E)
+    #                          so RUN knows the program exists
+    #   run          — starts the game
+    end_vars = load_addr + len(program) + 1  # one past the end marker
+    lo = end_vars & 0xFF
+    hi = (end_vars >> 8) & 0xFF
+    autorun = f'poke64829,1:poke45,{lo}:poke46,{hi}\rclr\rrun\r'
     with open(uartfile, 'wb') as f:
-        f.write(b'poke59632,1\rrun\r')
+        f.write(autorun.encode('ascii'))
 
     print(f'  autorun: {uartfile}')
 
