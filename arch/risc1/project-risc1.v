@@ -8,6 +8,12 @@ module fpga_gameconsole (
     output tx,
     input rx,
 
+    output i2s_en,
+    output i2s_bclk,
+    output i2s_lrck,
+    output i2s_mclk,
+    output i2s_data,
+
     output lcd_hsync,
     output lcd_vsync,
     output lcd_de,
@@ -39,6 +45,7 @@ module fpga_gameconsole (
         .clk(clk), .rst(rst),
         .led1(led1), .led2(led2),
         .tx(tx), .rx(rx),
+        .i2s_en(i2s_en), .i2s_bclk(i2s_bclk), .i2s_lrck(i2s_lrck), .i2s_mclk(i2s_mclk), .i2s_data(i2s_data),
         .lcd_hsync(lcd_hsync), .lcd_vsync(lcd_vsync), .lcd_de(lcd_de),
         .lcd_data(lcd_data), .lcd_pwm(lcd_pwm), .lcd_clk()
     );

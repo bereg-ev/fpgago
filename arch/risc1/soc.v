@@ -10,6 +10,12 @@ module soc(
     input rx,
     output tx,
 
+    output i2s_en,
+    output i2s_bclk,
+    output i2s_lrck,
+    output i2s_mclk,
+    output i2s_data,
+
     output lcd_hsync,
     output lcd_vsync,
     output lcd_de,
@@ -146,6 +152,21 @@ module soc(
     // ---- LFSR random number generator (16-bit, free-running) ----
     reg [15:0] lfsr;
 
+    // ---- Audio synthesizer (3-channel, SID-style) ----
+    wire audio_port_range = (port_addr[7:4] == 4'h4);     /* ports 0x40..0x4F */
+    wire [7:0] audio_rdata;
+
+    audio audio0(
+        .clk(clk), .rst(rst),
+        .reg_addr(port_addr[3:0]),
+        .reg_wdata(port_data_out),
+        .reg_we(port_wr && audio_port_range),
+        .reg_rdata(audio_rdata),
+        .i2s_data(i2s_data), .i2s_mclk(i2s_mclk),
+        .i2s_lrck(i2s_lrck), .i2s_bclk(i2s_bclk),
+        .audio_en(i2s_en)
+    );
+
     // ---- LCD output mux ----
     assign lcd_pwm = 1'b1;
     assign lcd_clk = clk;
@@ -257,6 +278,9 @@ module soc(
                         port_data_in <= rxdata;
                         rxrdy <= 0;
                     end
+                    default:
+                        if (audio_port_range)
+                            port_data_in <= audio_rdata;            // audio status
                 endcase
             end
 

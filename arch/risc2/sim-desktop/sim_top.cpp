@@ -167,7 +167,166 @@ static void uart_print(Vsoc* top)
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * 4.  main()
+ * 4.  SDL2 Audio — mirrors the Verilog audio.v waveform generation
+ *
+ * Reads the same register values that the CPU writes to the Verilog model,
+ * so simulation sound matches real hardware I2S output exactly.
+ * ══════════════════════════════════════════════════════════════════════════ */
+static const int AUDIO_SAMPLE_RATE = 48000;
+
+/* Shared state: written by main loop, read by audio callback */
+struct AudioVoice {
+    uint16_t freq;          /* phase increment per sample */
+    uint8_t  volume;        /* 0..255 */
+    uint8_t  waveform;      /* 0=tri, 1=saw, 2=square, 3=noise, 4=sine */
+    uint16_t phase;         /* running phase accumulator */
+    uint16_t lfsr;          /* noise LFSR */
+};
+
+static struct {
+    AudioVoice voice[3];
+    uint8_t    master_vol;  /* 0..255, default 255 */
+} audio_state;
+
+/* Quarter-wave sine LUT (same values as audio.v) */
+static const int8_t sine_lut[64] = {
+     0,  3,  6,  9, 12, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46,
+    49, 51, 54, 57, 59, 62, 64, 66, 69, 71, 73, 75, 77, 79, 81, 83,
+    85, 86, 88, 89, 91, 92, 94, 95, 96, 97, 98, 99,100,101,102,103,
+   104,104,105,105,106,106,107,107,107,107,108,108,108,108,108,108
+};
+
+static int8_t sine_wave(uint8_t ph)
+{
+    uint8_t idx;
+    switch (ph >> 6) {
+        case 0: idx = ph & 0x3F;        break;
+        case 1: idx = (~ph) & 0x3F;     break;
+        case 2: idx = ph & 0x3F;        break;
+        case 3: idx = (~ph) & 0x3F;     break;
+        default: idx = 0; break;
+    }
+    int8_t mag = sine_lut[idx];
+    return (ph & 0x80) ? (int8_t)(-mag) : mag;
+}
+
+static int8_t gen_wave(uint8_t wave_sel, uint16_t ph, uint16_t noise)
+{
+    switch (wave_sel) {
+        case 0: /* triangle */
+            if (ph & 0x8000)
+                return (int8_t)(~(uint8_t)(ph >> 7));
+            else
+                return (int8_t)(ph >> 7);
+        case 1: /* sawtooth */
+            return (int8_t)((ph >> 8) - 0x80);
+        case 2: /* square */
+            return (ph & 0x8000) ? -128 : 127;
+        case 3: /* noise */
+            return (int8_t)((noise >> 8) - 0x80);
+        case 4: /* sine */
+            return sine_wave((uint8_t)(ph >> 8));
+        default:
+            return 0;
+    }
+}
+
+/* Triangle wave matching hardware triwave() function */
+static int8_t hw_triwave(uint16_t ph)
+{
+    if (ph & 0x8000)
+        return (int8_t)(~(uint8_t)(ph >> 7));
+    else
+        return (int8_t)(ph >> 7);
+}
+
+/* SDL2 runs at 48 kHz — use freq_reg = Hz * 65536 / 48000 */
+static const uint16_t scale_freqs[8] = {358,401,450,476,535,601,674,713};
+static const uint16_t chord_freqs[3] = {358,450,535}; /* C4, E4, G4 */
+
+/* Test mode state (matches hardware test block) */
+static struct {
+    uint16_t tp0, tp1, tp2;
+    uint8_t  chord_sel;
+    uint32_t scale_timer;
+    uint8_t  scale_note;
+} test_state;
+
+static void audio_callback(void* /*userdata*/, Uint8* stream, int len)
+{
+    int16_t* out = (int16_t*)stream;
+    int samples = len / (int)sizeof(int16_t);
+    uint8_t mode = audio_state.master_vol;
+
+    for (int s = 0; s < samples; s++) {
+        int16_t val = 0;
+
+        if (mode == 0x42) {
+            /* b: single 440 Hz triangle */
+            test_state.tp0 += 601;  /* 440 Hz at 48 kHz */
+            val = (int16_t)hw_triwave(test_state.tp0) << 4; /* /16 to match hw volume */
+        }
+        else if (mode == 0x43) {
+            /* c: C major chord, round-robin */
+            test_state.tp0 += chord_freqs[0];
+            test_state.tp1 += chord_freqs[1];
+            test_state.tp2 += chord_freqs[2];
+            int8_t tw;
+            switch (test_state.chord_sel) {
+                case 0: tw = hw_triwave(test_state.tp0); break;
+                case 1: tw = hw_triwave(test_state.tp1); break;
+                default: tw = hw_triwave(test_state.tp2); break;
+            }
+            test_state.chord_sel++;
+            if (test_state.chord_sel >= 3) test_state.chord_sel = 0;
+            val = (int16_t)tw << 4;
+        }
+        else if (mode == 0x4D) {
+            /* m: C major scale */
+            test_state.tp0 += scale_freqs[test_state.scale_note];
+            test_state.scale_timer++;
+            if (test_state.scale_timer >= 19200) { /* 0.4s at 48 kHz */
+                test_state.scale_timer = 0;
+                test_state.scale_note = (test_state.scale_note >= 7) ? 0 : test_state.scale_note + 1;
+            }
+            val = (int16_t)hw_triwave(test_state.tp0) << 4;
+        }
+        else {
+            /* Normal pipeline mode */
+            int32_t mix = 0;
+            for (int v = 0; v < 3; v++) {
+                AudioVoice& av = audio_state.voice[v];
+                av.phase += av.freq;
+                uint16_t fb = ((av.lfsr >> 15) ^ (av.lfsr >> 14) ^ (av.lfsr >> 12) ^ (av.lfsr >> 3)) & 1;
+                av.lfsr = (uint16_t)((av.lfsr << 1) | fb);
+                int8_t sample = gen_wave(av.waveform, av.phase, av.lfsr);
+                mix += (int32_t)sample * (int32_t)av.volume;
+            }
+            int32_t final_val = (mix * (int32_t)audio_state.master_vol) >> 10;
+            if (final_val > 32767) final_val = 32767;
+            if (final_val < -32768) final_val = -32768;
+            val = (int16_t)final_val;
+        }
+
+        out[s] = val;
+    }
+}
+
+/* Read audio register state from the Verilator model's audio0 instance.
+ * Uses the VL_PUBLIC accessors generated by Verilator. The audio module's
+ * registers are arrays, so we access them via the rootp pointer. */
+static void audio_sync_from_verilog(Vsoc* top)
+{
+    auto* r = top->rootp;
+    audio_state.master_vol = r->soc__DOT__audio0__DOT__master_vol;
+    for (int i = 0; i < 3; i++) {
+        audio_state.voice[i].freq     = r->soc__DOT__audio0__DOT__freq[i];
+        audio_state.voice[i].waveform = r->soc__DOT__audio0__DOT__waveform[i];
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 5.  main()
  * ══════════════════════════════════════════════════════════════════════════ */
 int main(int argc, char** argv)
 {
@@ -177,7 +336,7 @@ int main(int argc, char** argv)
     Vsoc* top = new Vsoc{ctx};
 
     /* ── SDL2 init ── */
-    if (SDL_Init(SDL_INIT_VIDEO) < 0)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0)
     {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
@@ -210,6 +369,28 @@ int main(int argc, char** argv)
         SDL_TEXTUREACCESS_STREAMING,
         LCD_W, LCD_H);
     if (!texture) { fprintf(stderr, "SDL_CreateTexture: %s\n", SDL_GetError()); return 1; }
+
+    /* ── SDL2 Audio init ── */
+    memset(&audio_state, 0, sizeof(audio_state));
+    audio_state.master_vol = 255;
+    audio_state.voice[0].lfsr = 0xACE1;
+    audio_state.voice[1].lfsr = 0x1234;
+    audio_state.voice[2].lfsr = 0x5678;
+
+
+    SDL_AudioSpec want, have;
+    SDL_zero(want);
+    want.freq     = AUDIO_SAMPLE_RATE;
+    want.format   = AUDIO_S16SYS;
+    want.channels = 1;
+    want.samples  = 512;
+    want.callback = audio_callback;
+
+    SDL_AudioDeviceID audio_dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    if (audio_dev == 0)
+        fprintf(stderr, "SDL_OpenAudioDevice: %s (audio disabled)\n", SDL_GetError());
+    else
+        SDL_PauseAudioDevice(audio_dev, 0);     /* start playback */
 
     /* ── Framebuffer: one ARGB word per pixel ── */
     static uint32_t fb[LCD_W * LCD_H];
@@ -288,6 +469,9 @@ int main(int argc, char** argv)
         bool cur_vsync = (bool)top->lcd_vsync;
         if (prev_vsync && !cur_vsync)
         {
+            /* Sync audio register state from Verilog model to SDL2 callback */
+            audio_sync_from_verilog(top);
+
             /* Upload completed frame to GPU texture and display */
             SDL_UpdateTexture(texture, NULL, fb, LCD_W * (int)sizeof(uint32_t));
             SDL_RenderClear(renderer);
@@ -345,6 +529,7 @@ int main(int argc, char** argv)
     delete top;
     delete ctx;
 
+    if (audio_dev) SDL_CloseAudioDevice(audio_dev);
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

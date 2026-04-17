@@ -56,6 +56,8 @@ class ALUInstRR<bits<5> op, string mnem, SDNode opnode,
   let isCommutable = isComm;
   // Two-address constraint: $dst tied to $src1
   let Constraints = "$dst = $src1";
+  // ALU ops clobber CPU flags (C, Z, N, V)
+  let Defs = [FLAGS];
 }
 
 // ALU two-address register-immediate format
@@ -74,4 +76,6 @@ class ALUInstRI<bits<5> op, string mnem, SDNode opnode>
   let Inst{19-16} = imm{19-16};
   let Inst{15-0}  = imm{15-0};
   let Constraints = "$dst = $src1";
+  // ALU ops clobber CPU flags (C, Z, N, V)
+  let Defs = [FLAGS];
 }

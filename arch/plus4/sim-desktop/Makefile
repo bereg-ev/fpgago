@@ -41,6 +41,7 @@ GAME_trailblazer = $(GAMES_PRG_BASE)/t/Trailblazer.prg|prg|Trailblazer (racing)
 GAME_tacman     = $(GAMES_PRG_BASE)/t/Tacman.prg|prg|Tacman (Pac-Man clone)
 GAME_manicminer = $(GAMES_PRG_BASE)/m/Manic%20Miner.prg|prg|Manic Miner (platformer)
 GAME_thrust     = $(GAMES_PRG_BASE)/t/Thrust.prg|prg|Thrust (gravity shooter)
+GAME_terranova  = $(GAMES_PRG_BASE)/t/Terra%20Nova.d64.gz|d64gz|Terra Nova
 GAME_guess      = $(GAMES_BAS_BASE)/guess.bas|bas|Number guessing game
 GAME_lunar      = $(GAMES_BAS_BASE)/lunar.bas|bas|Lunar lander simulation
 GAME_hammurabi  = $(GAMES_BAS_BASE)/hammurabi.bas|bas|Kingdom management
@@ -126,6 +127,7 @@ list-plus4-games:
 	@printf "    %-14s %s\n" "tacman"      "Tacman (Pac-Man clone)"
 	@printf "    %-14s %s\n" "manicminer"  "Manic Miner (platformer)"
 	@printf "    %-14s %s\n" "thrust"      "Thrust (gravity shooter)"
+	@printf "    %-14s %s\n" "terranova"   "Terra Nova"
 	@echo ""
 	@echo "  BASIC games (auto-typed via keyboard):"
 	@printf "    %-14s %s\n" "guess"      "Number guessing game"
@@ -155,12 +157,25 @@ download-plus4-game:
 	echo "  applicable copyright law in your jurisdiction."; \
 	echo ""; \
 	mkdir -p $(ROMS)/games; \
-	outfile="$(ROMS)/games/$(GAME).$${fmt}"; \
+	if [ "$$fmt" = "d64gz" ]; then \
+	    outfile="$(ROMS)/games/$(GAME).d64.gz"; \
+	else \
+	    outfile="$(ROMS)/games/$(GAME).$${fmt}"; \
+	fi; \
 	curl -L --fail -o "$$outfile" "$$url" || { echo "Download failed."; exit 1; }; \
 	echo ""; \
 	if [ "$$fmt" = "prg" ]; then \
 	    echo "  Converting PRG to RAM hex + autorun..."; \
 	    python3 $(ROMS)/prg2hex.py "$$outfile" $(ROMS)/game.hex $(ROMS)/game.uart; \
+	elif [ "$$fmt" = "d64gz" ]; then \
+	    echo "  Decompressing D64 disk image..."; \
+	    gunzip -f -k "$$outfile"; \
+	    d64file="$(ROMS)/games/$(GAME).d64"; \
+	    prgfile="$(ROMS)/games/$(GAME).prg"; \
+	    echo "  Extracting PRG from D64..."; \
+	    python3 $(ROMS)/d64extract.py "$$d64file" "$$prgfile"; \
+	    echo "  Converting PRG to RAM hex + autorun..."; \
+	    python3 $(ROMS)/prg2hex.py "$$prgfile" $(ROMS)/game.hex $(ROMS)/game.uart; \
 	elif [ "$$fmt" = "bas" ]; then \
 	    echo "  Converting BAS to UART input..."; \
 	    python3 $(ROMS)/bas2uart.py "$$outfile" $(ROMS)/game.uart; \
@@ -183,7 +198,7 @@ run-plus4-game:
 	    fi; \
 	    echo "Synthesizing Plus/4 for FPGA..."; \
 	    cd $(PROJ) && bash run.sh; \
-	elif [ "$$fmt" = "prg" ]; then \
+	elif [ "$$fmt" = "prg" ] || [ "$$fmt" = "d64gz" ]; then \
 	    test -f $(ROMS)/game.hex || { echo "Run 'make download-game ARCH=plus4 GAME=$(GAME)' first."; exit 1; }; \
 	    echo "Building with PRG game loaded into RAM..."; \
 	    rm -rf obj_dir; \

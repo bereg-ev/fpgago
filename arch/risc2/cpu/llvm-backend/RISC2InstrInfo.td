@@ -341,7 +341,7 @@ def CMP_RR : RISC2Inst<0xF,
   let Inst{23-20} = src1;
   let Inst{19-16} = src2;
   let Inst{15-0}  = 0;
-  let Defs = [];   // flag updates tracked via glue in ISelLowering
+  let Defs = [FLAGS];
   let hasSideEffects = 1;
 }
 
@@ -356,6 +356,7 @@ def CMP_RI : RISC2Inst<0xF,
   let Inst{23-20} = src1;
   let Inst{19-16} = imm{19-16};
   let Inst{15-0}  = imm{15-0};
+  let Defs = [FLAGS];
   let hasSideEffects = 1;
 }
 
@@ -373,6 +374,7 @@ def RCR_RI : RISC2Inst<0xE,
   let Inst{19-16} = src1;
   let Inst{15-0}  = 0;
   let Constraints = "$dst = $src1";
+  let Defs = [FLAGS];
 }
 
 //===----------------------------------------------------------------------===//
@@ -402,6 +404,7 @@ def JNZ : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
   let Inst{23-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 def JZ : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
@@ -411,6 +414,7 @@ def JZ : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
   let Inst{23-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 def JNC : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
@@ -420,6 +424,7 @@ def JNC : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
   let Inst{23-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 def JC : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
@@ -429,6 +434,7 @@ def JC : RISC2Inst<0x3, (outs), (ins brtarget24:$target),
   let Inst{23-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 // Signed branches: reuse IRET slot [26:24]=101 with [23]=1
@@ -443,6 +449,7 @@ def JGE : RISC2Inst<0x3, (outs), (ins brtarget22:$target),
   let Inst{21-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 def JLT : RISC2Inst<0x3, (outs), (ins brtarget22:$target),
@@ -454,6 +461,7 @@ def JLT : RISC2Inst<0x3, (outs), (ins brtarget22:$target),
   let Inst{21-0}  = target;
   let isBranch    = 1;
   let isTerminator = 1;
+  let Uses = [FLAGS];
 }
 
 // CALL: hardwired saves return addr to R15
@@ -466,7 +474,7 @@ def CALL_target : RISC2Inst<0x3,
   let Inst{26-24} = 0b111;
   let Inst{23-0}  = target;
   let isCall      = 1;
-  let Defs        = [R15];    // CALL unconditionally writes R15
+  let Defs        = [R15, FLAGS];  // CALL writes R15; callee clobbers FLAGS
 }
 
 // CALL via register (indirect call)
@@ -479,7 +487,7 @@ def CALL_reg : RISC2Inst<0x3,
   let Inst{26-24} = 0b111;
   let Inst{19-16} = addr;
   let isCall      = 1;
-  let Defs        = [R15];
+  let Defs        = [R15, FLAGS];
 }
 
 // RET: jumps to R15

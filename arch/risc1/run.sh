@@ -14,7 +14,7 @@ yosys -q -p "read_verilog -I ./cpu -I . project-risc1.v; synth_ecp5 -top fpga_ga
     project-risc1.v soc.v \
     $CPUDIR/*.v \
     $UTIL/ecp5.v \
-    $PERI/uart.v $PERI/lcd_out.v $PERI/lcd_char.v $PERI/debugger.v
+    $PERI/uart.v $PERI/audio.v $PERI/lcd_out.v $PERI/lcd_char.v $PERI/debugger.v
 
 echo "  Place & route with nextpnr..."
 nextpnr-ecp5 --json out.json --textcfg out.config \

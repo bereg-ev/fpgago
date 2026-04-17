@@ -44,6 +44,8 @@ module dcache(
     input  wire [15:0] ctrl_data,
     input  wire        ctrl_we,
     output wire        gpu_busy,
+    output wire [7:0]  sdram_dbg,
+    output wire [7:0]  prefetch_dbg,
 
     /* Y SDRAM physical bus */
     output wire        sd_cke,
@@ -107,6 +109,7 @@ reg [2:0]  state;
 reg [14:0] r_row_reg;
 reg        start_read, start_init;
 reg        init_sent;
+reg [7:0]  prefetch_cnt;  /* debug: counts start_read toggles */
 reg [10:0] prev_col;
 reg        row_triggered;
 
@@ -156,16 +159,17 @@ sdram sdram_y(
     .w_addr(w_addr_out),    .r_addr(bram_r_addr),
     .w_stop(w_stop_r),      .w_col(w_col_r),
     .w_addr_start(chunk_col),
-    .r_col(10'b0),          .r_stop(10'd479),
+    .r_col(12'b0),          .r_stop(12'd63),    /* DEBUG: short burst like stable version */
     .fill_en(fill_en_r),    .fill_const(fill_const_r),
     .sd_cke(sd_cke),        .sd_cs(sd_cs),
     .sd_ras(sd_ras),        .sd_cas(sd_cas),                .sd_we(sd_we),
     .sd_a(sd_a),            .sd_d(sd_d),                    .sd_ba(sd_ba),
     .sd_ldqm(sd_ldqm),      .sd_udqm(sd_udqm),
-    .dbg(), .write_pending(write_pending)
+    .dbg(sdram_dbg), .write_pending(write_pending)
 );
 
 assign gpu_busy = (state != S_IDLE);
+assign prefetch_dbg = prefetch_cnt;
 
 // ── MMIO register writes ─────────────────────────────────────────────────────
 always @(posedge clk or negedge rst)
@@ -204,7 +208,7 @@ reg flush_reset_dirty;
 always @(posedge clk or negedge rst)
 if (!rst) begin
     start_init<=0; start_read<=0; r_row_reg<=0;
-    init_sent<=0; prev_col<=0; row_triggered<=0;
+    init_sent<=0; prev_col<=0; row_triggered<=0; prefetch_cnt<=0;
 end else begin
     prev_col <= col;
 
@@ -219,11 +223,16 @@ end else begin
             ({5'b0, front_buf, row[8:0]} + 15'd1);
         start_read    <= ~start_read;
         row_triggered <= 1'b1;
+        prefetch_cnt  <= prefetch_cnt + 1;
     end
 
     if (col==11'd0 && prev_col!=11'd0)
         row_triggered <= 1'b0;
 end
+
+// ── Watchdog: if state machine is stuck for 2M cycles, force back to IDLE ────
+reg [24:0] wd_cnt;
+wire wd_timeout = wd_cnt[24];  /* ~860ms at 19.4 MHz — enough for full CLEAR_FB */
 
 // ── Main state machine ───────────────────────────────────────────────────────
 always @(posedge clk or negedge rst)
@@ -234,12 +243,23 @@ if (!rst) begin
     w_row_r <= 0; w_col_r <= 0; w_stop_r <= 479;
     clear_row <= 0; chunk_col <= 0;
     flush_reset_dirty <= 0;
+    wd_cnt <= 0;
 end else begin
     flush_reset_dirty <= 0;   // default: one-shot pulse
 
+    // Watchdog counter: runs when not IDLE, resets when IDLE
+    if (state == S_IDLE)
+        wd_cnt <= 0;
+    else if (!wd_timeout)
+        wd_cnt <= wd_cnt + 1;
+
+    // Watchdog recovery: force back to IDLE if stuck
+    if (wd_timeout && state != S_IDLE) begin
+        state <= S_IDLE;
+    end else
     case (state)
 
-    // ── Idle: accept CMD writes ─────────────────────────────────────────────
+    // ── Idle: accept CMD writes (DEBUG: reject all GPU commands to test pure reads) ──
     S_IDLE: begin
         if (mmio_sel && reg_idx == 4'd8) begin
             case (ctrl_data[1:0])

@@ -157,7 +157,7 @@ module sdram(
 
 	reg start_read0, read_burst, readst0, readst1, readst2, we0, we1, we2, rrefresh;
 	reg [8:0] read_sh;
-	reg [(`BRAM_ADDR_WIDTH - 1):0] r_addr0, r_addr1, r_addr2;
+	reg [(`BRAM_ADDR_WIDTH - 1):0] r_addr0, r_addr1, r_addr2, r_addr3;
 	wire read_go = rdy && initialized && (start_init == start_init0) && (start_read != start_read0);
 	    // priority: 1) init, 2) read, 3) write
 
@@ -165,7 +165,7 @@ module sdram(
 	if (!rst)
 	begin
 		{start_read0, read, read_sh, read_cmd, a_r, read_burst, readst0, readst1, readst2} <= 0;
-		{bram_we, we0, we1, bram_di, r_addr, r_addr0, r_addr1, r_addr2, rrefresh, a_r_abs} <= 0;
+		{bram_we, we0, we1, we2, bram_di, r_addr, r_addr0, r_addr1, r_addr2, rrefresh, a_r_abs} <= 0;
 	end else
 	begin
 		if (read_go)
@@ -247,7 +247,8 @@ module sdram(
 	reg start_write0, wrefresh;
 	reg [8:0] write_sh;
 	wire write_go = rdy && initialized && (start_init == start_init0) && (start_read == start_read0) && (start_write != start_write0);
-	    // priority: 1) init, 2) read, 3) write
+
+	/* Debug counters (inactive) */
 
 	always @(posedge clk or negedge rst)
 	if (!rst)

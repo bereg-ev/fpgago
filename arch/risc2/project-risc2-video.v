@@ -9,13 +9,11 @@ module fpga_gameconsole (
 	output tx, 			// serial UART to STM32
 	input rx,
 
-//`ifdef AUDIO
-//    output i2s_en,
-//    output i2s_bclk,
-//    output i2s_lrck,
-//    output i2s_mclk,
-//    output i2s_data,
-//`endif
+    output i2s_en,
+    output i2s_bclk,
+    output i2s_lrck,
+    output i2s_mclk,
+    output i2s_data,
 
 //    output dbg1,
 //    output dbg2,
@@ -84,9 +82,7 @@ module fpga_gameconsole (
 	soc soc0(
     .clk(clk), .rst(rst), .led1(led1), .led2(led2), .tx(tx), .rx(rx), .dbg1(socdbg1), .dbg2(socdbg2),
 
-//`ifdef AUDIO
-//    .i2s_en(i2s_en), .i2s_bclk(i2s_bclk), .i2s_lrck(i2s_lrck), .i2s_mclk(i2s_mclk), .i2s_data(i2s_data),
-//`endif
+    .i2s_en(i2s_en), .i2s_bclk(i2s_bclk), .i2s_lrck(i2s_lrck), .i2s_mclk(i2s_mclk), .i2s_data(i2s_data),
 
     .lcd_hsync(lcd_hsync), .lcd_vsync(lcd_vsync), .lcd_de(lcd_de), .lcd_clk(lcd_clk),
     .lcd_pwm(lcd_pwm), .lcd_data(lcd_data),

@@ -353,58 +353,82 @@ module soc(
                     8'h3D: pend_ps2 = 8'h5D;  // =
                     8'h40: pend_ps2 = 8'h54;  // @
                     8'h22: begin pend_ps2 = 8'h1E; pend_shift = 1; end  // " = shift+2
+                    8'h81: pend_ps2 = 8'h05;  // F1
+                    8'h82: pend_ps2 = 8'h06;  // F2
+                    8'h83: pend_ps2 = 8'h04;  // F3
                     default: pend_ps2 = 8'h00;
                 endcase
             end
         endcase
     end
 
-    // Key press state machine: make code → wait → F0 → break code
-    // Simple counter approach (no case statement — avoids yosys optimization issues)
-    reg [19:0] key_counter;
+    // Key press state machine: [shift make →] key make → wait → key break [→ shift break]
+    // Counter-based (avoids yosys case-statement optimization issues)
+    reg [20:0] key_counter;
     reg [7:0] key_code;
+    reg key_needs_shift;
     reg key_strobe;
     reg [7:0] key_scancode;
 
-    localparam KEY_IDLE     = 0;
-    localparam KEY_HOLD     = 1;       // after make, count down
-    localparam KEY_BREAK_F0 = 700001;  // send F0
-    localparam KEY_BREAK_GAP = 700002; // small gap
-    localparam KEY_BREAK_CODE = 705002; // send break code
-    localparam KEY_DONE    = 705003;
+    // Counter timeline:
+    //  0          = idle
+    //  1          = shift make (if needed), else skip to key make
+    //  5000       = key make
+    //  705000     = F0 (break prefix for key)
+    //  710000     = key break code
+    //  715000     = F0 (break prefix for shift, if needed)
+    //  720000     = shift break code (if needed)
+    //  725000     = done, back to idle
 
     always @(posedge clk or negedge rst)
         if (!rst) begin
             key_counter <= 0;
             key_code <= 0;
+            key_needs_shift <= 0;
             key_strobe <= 0;
             key_scancode <= 0;
         end else begin
             key_strobe <= 0;
 
-            if (key_counter == KEY_IDLE) begin
-                // Idle: wait for UART byte
+            if (key_counter == 0) begin
                 if (uart_rx_valid && pend_ps2 != 8'h00) begin
                     key_code <= pend_ps2;
-                    key_scancode <= pend_ps2;
-                    key_strobe <= 1;
-                    key_counter <= KEY_HOLD;
+                    key_needs_shift <= pend_shift;
+                    if (pend_shift) begin
+                        // Send SHIFT make
+                        key_scancode <= 8'h12;
+                        key_strobe <= 1;
+                    end
+                    key_counter <= 1;
                 end
-            end else if (key_counter == KEY_BREAK_F0) begin
-                // Send F0 break prefix
-                key_scancode <= 8'hF0;
-                key_strobe <= 1;
-                key_counter <= key_counter + 1;
-            end else if (key_counter == KEY_BREAK_CODE) begin
-                // Send break code
+            end else if (key_counter == 5000) begin
+                // Send key make
                 key_scancode <= key_code;
                 key_strobe <= 1;
                 key_counter <= key_counter + 1;
-            end else if (key_counter >= KEY_DONE) begin
-                // Done, back to idle
-                key_counter <= KEY_IDLE;
+            end else if (key_counter == 705000) begin
+                // Send F0 break prefix for key
+                key_scancode <= 8'hF0;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter == 710000) begin
+                // Send key break code
+                key_scancode <= key_code;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter == 715000 && key_needs_shift) begin
+                // Send F0 break prefix for shift
+                key_scancode <= 8'hF0;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter == 720000 && key_needs_shift) begin
+                // Send shift break code
+                key_scancode <= 8'h12;
+                key_strobe <= 1;
+                key_counter <= key_counter + 1;
+            end else if (key_counter >= 725000) begin
+                key_counter <= 0;
             end else begin
-                // Counting
                 key_counter <= key_counter + 1;
             end
         end

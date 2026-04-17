@@ -31,3 +31,15 @@ def R15 : RISC2Reg<15, "r15", ["lr"]>;
 def GPR : RegisterClass<"RISC2", [i32], 32,
     (add R0, R1, R2, R3, R4, R5, R6, R7,
          R8, R9, R10, R11, R12, R13, R14, R15)>;
+
+// CPU flags register (C, Z, N, V — not directly accessible by software).
+// Used by LLVM to track data dependencies between flag-setting instructions
+// (CMP, ADD, SUB, AND, OR, XOR, RCL, RCR) and flag-reading branches
+// (JZ, JNZ, JC, JNC, JGE, JLT).  This prevents the scheduler from
+// inserting flag-clobbering ALU ops between a CMP and its branch.
+def FLAGS : Register<"flags"> {
+  let Namespace = "RISC2";
+}
+def FLG : RegisterClass<"RISC2", [i32], 32, (add FLAGS)> {
+  let isAllocatable = 0;
+}

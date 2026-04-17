@@ -58,6 +58,7 @@ VSRCS = \
     $(CPU)/alu_risc1.v \
     $(UTIL)/ecp5_simul.v \
     $(PERI)/uart.v \
+    $(PERI)/audio.v \
     $(PERI)/lcd_out.v \
     $(PERI)/debugger.v \
     lcd_char_sim.v

@@ -1,3 +1,19 @@
+SDL2 audio: freq=48000 fmt=0x8010 ch=1 samples=512
 Desktop simulation started.
 LCD: 480 x 272  window: 960 x 544
 UART keys: S=step  C=continue  P=print-regs  R=reset-CPU
+[DBG] Injected 'c' (0x63) at cycle 3000000
+[audio] cb=115 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=207 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=300 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=391 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=483 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=576 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=667 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=758 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=848 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=939 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=1032 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=1124 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=1215 peak=0 | v0: f=601 vol=0 w=4 | master=255
+[audio] cb=1306 peak=0 | v0: f=601 vol=0 w=4 | master=255

@@ -50,7 +50,7 @@ MAKEOVERRIDES := $(filter-out TARGET=%,$(MAKEOVERRIDES))
 
 # ── Game/platform matrix ────────────────────────────────────────────────────
 GAMES_RISC1 = char-snake
-GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels
+GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels sound-test
 GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess hello-pixels
 
 .PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 gcasm check-deps copyarch delarch newgame delgame \

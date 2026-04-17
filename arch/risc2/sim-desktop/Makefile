@@ -61,7 +61,7 @@ VSRCS = \
     $(PERI)/debugger.v \
     $(PERI)/lcd_out.v \
     $(PERI)/lcd_char.v \
-    $(PERI)/i2s.v \
+    $(PERI)/audio.v \
     $(PERI)/timer.v \
     $(PERI)/icache.v \
     $(PERI)/dcache.v \

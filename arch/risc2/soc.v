@@ -94,68 +94,102 @@ module soc(
     );
 `else
   `ifdef EXTENDED_MEM
-    /* Boot ROM: 3K words (12KB) across 3 banks of 1K words each */
-    wire [17:0] romL0_iout, romH0_iout, romL0_dout, romH0_dout;
-    wire [17:0] romL1_iout, romH1_iout, romL1_dout, romH1_dout;
-    wire [17:0] romL2_iout, romH2_iout, romL2_dout, romH2_dout;
+    /* Boot ROM: 8K words (32KB) across 8 banks of 1K words each */
+    wire [17:0] romL_iout [0:7], romH_iout [0:7];
+    wire [17:0] romL_dout [0:7], romH_dout [0:7];
+
+    `define ROM_BANK(idx, lfile, hfile) \
+        dual_port_ram_1k_18 #( lfile ) romL_``idx ( \
+            .clk_a(clk), .we_a(1'b0), \
+            .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[idx]), \
+            .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romL_dout[idx]) \
+        ); \
+        dual_port_ram_1k_18 #( hfile ) romH_``idx ( \
+            .clk_a(clk), .we_a(1'b0), \
+            .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[idx]), \
+            .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH_dout[idx]) \
+        );
 
     dual_port_ram_1k_18 #(
 `include "romL.vh"
-        ) romL0 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL0_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romL0_dout)
-    );
+    ) romL0 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[0]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[0]));
     dual_port_ram_1k_18 #(
 `include "romH.vh"
-        ) romH0 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH0_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH0_dout)
-    );
+    ) romH0 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[0]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[0]));
 
     dual_port_ram_1k_18 #(
 `include "romL2.vh"
-        ) romL1 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL1_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romL1_dout)
-    );
+    ) romL1 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[1]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[1]));
     dual_port_ram_1k_18 #(
 `include "romH2.vh"
-        ) romH1 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH1_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH1_dout)
-    );
+    ) romH1 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[1]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[1]));
 
     dual_port_ram_1k_18 #(
 `include "romL3.vh"
-        ) romL2 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL2_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romL2_dout)
-    );
+    ) romL2 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[2]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[2]));
     dual_port_ram_1k_18 #(
 `include "romH3.vh"
-        ) romH2 (
-        .clk_a(clk), .we_a(1'b0),
-        .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH2_iout),
-        .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]), .dout_b(romH2_dout)
-    );
+    ) romH2 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[2]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[2]));
 
-    reg [1:0] rom_ibank, rom_dbank;
+    dual_port_ram_1k_18 #(
+`include "romL4.vh"
+    ) romL3 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[3]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[3]));
+    dual_port_ram_1k_18 #(
+`include "romH4.vh"
+    ) romH3 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[3]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[3]));
+
+    dual_port_ram_1k_18 #(
+`include "romL5.vh"
+    ) romL4 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[4]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[4]));
+    dual_port_ram_1k_18 #(
+`include "romH5.vh"
+    ) romH4 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[4]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[4]));
+
+    dual_port_ram_1k_18 #(
+`include "romL6.vh"
+    ) romL5 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[5]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[5]));
+    dual_port_ram_1k_18 #(
+`include "romH6.vh"
+    ) romH5 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[5]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[5]));
+
+    dual_port_ram_1k_18 #(
+`include "romL7.vh"
+    ) romL6 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[6]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[6]));
+    dual_port_ram_1k_18 #(
+`include "romH7.vh"
+    ) romH6 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[6]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[6]));
+
+    dual_port_ram_1k_18 #(
+`include "romL8.vh"
+    ) romL7 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romL_iout[7]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romL_dout[7]));
+    dual_port_ram_1k_18 #(
+`include "romH8.vh"
+    ) romH7 (.clk_a(clk), .we_a(1'b0), .addr_a(instr_addr[11:2]), .din_a(18'b0), .dout_a(romH_iout[7]),
+             .clk_b(clk), .we_b(1'b0), .addr_b(data_addr[11:2]),  .dout_b(romH_dout[7]));
+
+    reg [2:0] rom_ibank, rom_dbank;
     always @(posedge clk) begin
-        rom_ibank <= instr_addr[13:12];
-        rom_dbank <= data_addr[13:12];
+        rom_ibank <= instr_addr[14:12];
+        rom_dbank <= data_addr[14:12];
     end
 
-    assign instr_data = rom_ibank == 2'd2 ? {romH2_iout[15:0], romL2_iout[15:0]}
-                      : rom_ibank == 2'd1 ? {romH1_iout[15:0], romL1_iout[15:0]}
-                      :                     {romH0_iout[15:0], romL0_iout[15:0]};
-    assign rom_out_value = rom_dbank == 2'd2 ? {romH2_dout[15:0], romL2_dout[15:0]}
-                         : rom_dbank == 2'd1 ? {romH1_dout[15:0], romL1_dout[15:0]}
-                         :                     {romH0_dout[15:0], romL0_dout[15:0]};
+    assign instr_data = {romH_iout[rom_ibank][15:0], romL_iout[rom_ibank][15:0]};
+    assign rom_out_value = {romH_dout[rom_dbank][15:0], romL_dout[rom_dbank][15:0]};
   `else
     /* Boot ROM: 1K words (4KB) */
     dual_port_ram_1k_18 #(
@@ -273,35 +307,8 @@ module soc(
         .row(lcd_row), .col(lcd_col)
     );
 
-    /* Hardware LCD char init — enable display after reset so text is visible
-       even if software init (gpu_clear_black/lcd_init) hasn't run yet */
-    reg [2:0] lcdi_cnt;
-    reg [23:0] lcdi_addr;
-    reg [15:0] lcdi_data;
-    reg        lcdi_we;
-
-    always @(posedge clk or negedge rst)
-    if (!rst) begin
-        lcdi_cnt <= 0;
-        lcdi_we  <= 0;
-    end else if (lcdi_cnt < 4) begin
-        lcdi_cnt <= lcdi_cnt + 1;
-        lcdi_we  <= 1;
-        case (lcdi_cnt)
-            0: begin lcdi_addr <= 24'h0C0000; lcdi_data <= 16'd112;   end  // X = 112
-            1: begin lcdi_addr <= 24'h0C0001; lcdi_data <= 16'd0;     end  // Y = 0
-            2: begin lcdi_addr <= 24'h0C0002; lcdi_data <= 16'd32;    end  // chnumx = 32
-            3: begin lcdi_addr <= 24'h0C0003; lcdi_data <= 16'h8011;  end  // enabled=1, chnumy=17
-        endcase
-    end else
-        lcdi_we <= 0;
-
-    wire        lcd_we   = (lcdi_cnt < 4) ? lcdi_we : data_wr;
-    wire [23:0] lcd_addr = (lcdi_cnt < 4) ? lcdi_addr : data_addr[23:0];
-    wire [15:0] lcd_wdata = (lcdi_cnt < 4) ? lcdi_data : data_out_value[15:0];
-
     lcd_char lcdc0(.clk(clk), .rst(rst),
-        .ctrl_addr(lcd_addr), .ctrl_data(lcd_wdata), .ctrl_we(lcd_we),
+        .ctrl_addr(data_addr[23:0]), .ctrl_data(data_out_value[15:0]), .ctrl_we(data_wr),
         .row(lcd_row), .col(lcd_col),
         .char_pixel_out(char_pixel_out), .char_active(char_active)
     );
@@ -393,19 +400,9 @@ module soc(
     );
 
     /* Y SDRAM: memory-mapped framebuffer with write-combining cache */
-    wire gpu_busy_raw;
-    /* GPU watchdog: if dcache is stuck for 2M cycles (~100ms), report not busy
-       so the CPU's gpu_wait() doesn't spin forever when Y SDRAM is unresponsive */
-    reg [20:0] gpu_watchdog;
-    wire gpu_busy = gpu_busy_raw & ~gpu_watchdog[20];
-    always @(posedge clk or negedge rst)
-        if (!rst)
-            gpu_watchdog <= 0;
-        else if (!gpu_busy_raw)
-            gpu_watchdog <= 0;
-        else if (!gpu_watchdog[20])
-            gpu_watchdog <= gpu_watchdog + 1;
-
+    wire gpu_busy;
+    wire [7:0] y_sdram_dbg;
+    wire [7:0] y_prefetch_dbg;
     dcache dcache0(
         .clk(clk), .rst(rst),
         .row(lcd_row), .col(lcd_col),
@@ -413,16 +410,26 @@ module soc(
         .ctrl_addr(data_addr[23:0]),
         .ctrl_data(data_out_value[15:0]),
         .ctrl_we(data_wr),
-        .gpu_busy(gpu_busy_raw),
+        .gpu_busy(gpu_busy),
+        .sdram_dbg(y_sdram_dbg),
+        .prefetch_dbg(y_prefetch_dbg),
         .sd_cke(ycke), .sd_cs(ycs), .sd_ras(yras), .sd_cas(ycas), .sd_we(ywe),
         .sd_a(ya), .sd_d(yd), .sd_ba(yba), .sd_ldqm(yldqm), .sd_udqm(yudqm)
     );
 
-    assign yclk = clk;  /* SDRAM clock output for Y bank */
+    /* ── Audio synthesizer (3-channel, SID-style) ──────────────────────── */
+    wire audio_range = (data_addr[23:4] == 20'h0B000);   /* 0x0B0000..0x0B000F */
+    wire [7:0] audio_rdata;
 
-    i2s i2s0(
+    audio audio0(
         .clk(clk), .rst(rst),
-        .en(i2s_en), .bclk(i2s_bclk), .lrck(i2s_lrck), .mclk(i2s_mclk), .data(i2s_data)
+        .reg_addr(data_addr[3:0]),
+        .reg_wdata(data_out_value[7:0]),
+        .reg_we(data_wr && audio_range),
+        .reg_rdata(audio_rdata),
+        .i2s_data(i2s_data), .i2s_mclk(i2s_mclk),
+        .i2s_lrck(i2s_lrck), .i2s_bclk(i2s_bclk),
+        .audio_en(i2s_en)
     );
 
     assign lcd_pwm = 1'b1;
@@ -435,7 +442,6 @@ module soc(
     end else
     begin
         if (lcd_de)
-            /* char_active: character window overlay; else show SDRAM background */
             lcd_data <= char_active ? char_pixel_out : sdram_pixel_out;
     end
 
@@ -462,7 +468,7 @@ module soc(
                       : (xdata_pending ? 1'b0 : 1'b1);
 `else
   `ifdef EXTENDED_MEM
-        data_in_valid <= (data_rd && (data_addr[23:14] == 10'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
+        data_in_valid <= (data_rd && (data_addr[23:15] == 9'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
                       : (xdata_pending ? 1'b0 : 1'b1);
   `else
         data_in_valid <= (data_rd && (data_addr[23:12] == 12'b0 || data_addr[23:16] == 8'h01 || sdram_data_range)) ? 1'b0
@@ -474,7 +480,7 @@ module soc(
         if (data_rd2 && data_addr[23:15] == 9'b0)              // read boot memory (32KB)
 `else
   `ifdef EXTENDED_MEM
-        if (data_rd2 && data_addr[23:14] == 10'b0)             // read boot memory (12KB)
+        if (data_rd2 && data_addr[23:15] == 9'b0)              // read boot memory (32KB)
   `else
         if (data_rd2 && data_addr[23:12] == 12'b0)             // read boot memory (4KB)
   `endif
@@ -542,12 +548,16 @@ module soc(
         if (data_rd2 && data_addr[23:16] == 8'h01)
             data_in_value <= dataram_out;
 
-        /* dcache STATUS register: addr 0x0A0024 (n=9, byte offset 9*4=0x24) */
+        /* dcache STATUS register: addr 0x0A0024 (n=9, byte offset 9*4=0x24)
+           Returns: [7:1] = Y SDRAM debug {read,write,init,initialized,rdy}, [0] = gpu_busy */
         if (data_rd && data_addr == 24'h0A0024)
-            data_in_value <= {31'b0, gpu_busy};
+            data_in_value <= {24'b0, y_sdram_dbg, gpu_busy};
 
         if (data_rd && data_addr == 24'hf0010)               // icache write busy
             data_in_value <= {31'b0, icache_wr_busy};
+
+        if (data_rd && audio_range)                          // audio status register
+            data_in_value <= {24'b0, audio_rdata};
 
         /* X SDRAM data cache read result */
         if (icache_data_valid)

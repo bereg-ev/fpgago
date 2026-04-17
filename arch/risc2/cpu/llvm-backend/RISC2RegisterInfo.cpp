@@ -44,8 +44,9 @@ RISC2RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
 
 BitVector RISC2RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
   BitVector Reserved(getNumRegs());
-  Reserved.set(RISC2::R7);   // R7 is scratch for frame-index elimination
-  Reserved.set(RISC2::R14);  // SP is reserved
+  Reserved.set(RISC2::R7);     // R7 is scratch for frame-index elimination
+  Reserved.set(RISC2::R14);    // SP is reserved
+  Reserved.set(RISC2::FLAGS);  // FLAGS is not allocatable
   return Reserved;
 }
 

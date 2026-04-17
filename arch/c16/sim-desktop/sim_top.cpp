@@ -323,6 +323,12 @@ int main(int argc, char** argv)
                             uart_queue.push(0x0Du);
                         else if (sym == SDLK_BACKSPACE)
                             uart_queue.push(0x08u);
+                        else if (sym == SDLK_F1 || (sym == SDLK_1 && (ev.key.keysym.mod & KMOD_ALT)))
+                            uart_queue.push(0x81u);
+                        else if (sym == SDLK_F2 || (sym == SDLK_2 && (ev.key.keysym.mod & KMOD_ALT)))
+                            uart_queue.push(0x82u);
+                        else if (sym == SDLK_F3 || (sym == SDLK_3 && (ev.key.keysym.mod & KMOD_ALT)))
+                            uart_queue.push(0x83u);
                     }
                 }
             }
