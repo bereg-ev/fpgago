@@ -99,3 +99,5 @@ arch/c64/roms/*.d64
 arch/c64/roms/game.hex
 arch/c64/roms/game_params.vh
 arch/c64/roms/game.uart
+
+AUDIO_STATUS.md
