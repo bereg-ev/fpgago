@@ -328,8 +328,52 @@ static void audio_sync_from_verilog(Vsoc* top)
 /* ══════════════════════════════════════════════════════════════════════════
  * 5.  main()
  * ══════════════════════════════════════════════════════════════════════════ */
+/* ── Optional headless mode ────────────────────────────────────────────────
+ *
+ * Triggered by env var SIM_HEADLESS_FRAMES=N.  When set:
+ *   - Run for exactly N rendered frames (vsync falling edges).
+ *   - Force SDL_VIDEODRIVER=dummy and SDL_AUDIODRIVER=dummy.
+ *   - On exit, write the final framebuffer to SIM_SCREENSHOT (default
+ *     "screenshot.ppm") in raw P6 PPM format.
+ *   - Print CPU instr_addr every SIM_TRACE_FRAMES frames (default 5).
+ * ──────────────────────────────────────────────────────────────────────── */
+static void write_ppm(const char* path, uint32_t* fb_argb, int w, int h)
+{
+    FILE* f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "Could not open %s\n", path); return; }
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    for (int i = 0; i < w * h; i++)
+    {
+        uint32_t px = fb_argb[i];
+        uint8_t r = (px >> 16) & 0xFF;
+        uint8_t g = (px >>  8) & 0xFF;
+        uint8_t b = (px      ) & 0xFF;
+        fwrite(&r, 1, 1, f);
+        fwrite(&g, 1, 1, f);
+        fwrite(&b, 1, 1, f);
+    }
+    fclose(f);
+    fprintf(stderr, "Saved %s (%dx%d)\n", path, w, h);
+}
+
 int main(int argc, char** argv)
 {
+    /* ── Headless mode setup (must be done before SDL_Init) ── */
+    const char* hf_env  = getenv("SIM_HEADLESS_FRAMES");
+    int  headless_frames = hf_env ? atoi(hf_env) : 0;
+    bool headless        = headless_frames > 0;
+    const char* shot_env = getenv("SIM_SCREENSHOT");
+    const char* shot_path = shot_env ? shot_env : "screenshot.ppm";
+    const char* tf_env   = getenv("SIM_TRACE_FRAMES");
+    int trace_period     = tf_env ? atoi(tf_env) : 5;
+    if (headless) {
+        setenv("SDL_VIDEODRIVER", "dummy", 1);
+        setenv("SDL_AUDIODRIVER", "dummy", 1);
+        fprintf(stderr,
+            "Headless mode: running %d frames, writing %s, trace every %d frames.\n",
+            headless_frames, shot_path, trace_period);
+    }
+
     /* ── Verilator context ── */
     VerilatedContext* ctx = new VerilatedContext;
     ctx->commandArgs(argc, argv);
@@ -356,7 +400,8 @@ int main(int argc, char** argv)
 
     SDL_Renderer* renderer = SDL_CreateRenderer(
         window, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        headless ? SDL_RENDERER_SOFTWARE
+                 : (SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC));
     if (!renderer) { fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError()); return 1; }
 
     /* Nearest-neighbour upscale so pixels look crisp at 2× */
@@ -402,6 +447,7 @@ int main(int argc, char** argv)
     bool prev_vsync = true;    /* previous vsync value for falling-edge detection   */
     bool running    = true;
     int  rst_count  = 0;
+    int  frame_count = 0;
 
     /* ── Assert reset ── */
     top->rst = 0;
@@ -478,6 +524,65 @@ int main(int argc, char** argv)
             SDL_RenderCopy(renderer, texture, NULL, NULL);
             SDL_RenderPresent(renderer);    /* blocks until monitor vsync if PRESENTVSYNC */
             pixel_idx = 0;
+            frame_count++;
+
+            /* Headless trace: print CPU PC / stage / instruction register so
+             * we can tell whether the CPU is making forward progress. */
+            if (headless && trace_period > 0 && (frame_count % trace_period) == 0)
+            {
+                auto* r = top->rootp;
+                uint32_t pc    = r->soc__DOT__instr_addr;
+                uint32_t stage = r->soc__DOT__cpu0__DOT__stage;
+                uint32_t ireg  = r->soc__DOT__cpu0__DOT__instr_reg;
+#ifdef HW_V2
+                uint32_t xfers = r->soc__DOT__psram_iface0__DOT__psram0__DOT__xfer_count;
+                uint32_t pi_st = r->soc__DOT__psram_iface0__DOT__state;
+                uint32_t ps_st = r->soc__DOT__psram_iface0__DOT__psram0__DOT__state;
+                bool qmode     = r->soc__DOT__psram_chip0__DOT__qpi_mode;
+                uint32_t r1v = r->soc__DOT__cpu0__DOT__cpu_registers[1];
+                uint32_t r3v = r->soc__DOT__cpu0__DOT__cpu_registers[3];
+                uint32_t r4v = r->soc__DOT__cpu0__DOT__cpu_registers[4];
+                uint32_t r5v = r->soc__DOT__cpu0__DOT__cpu_registers[5];
+                uint32_t r6v = r->soc__DOT__cpu0__DOT__cpu_registers[6];
+                fprintf(stderr,
+                    "frame %d pc=0x%06x stg=%u ireg=0x%08x r1=%x r3=%x r4=%x r5=%x r6=%x | xfers=%u iface=%u ctrl=%u qpi=%d\n",
+                    frame_count, pc & 0xFFFFFF, stage, ireg, r1v, r3v, r4v, r5v, r6v,
+                    xfers, pi_st, ps_st, qmode);
+#else
+                fprintf(stderr,
+                    "frame %d pc=0x%06x stg=%u ireg=0x%08x\n",
+                    frame_count, pc & 0xFFFFFF, stage, ireg);
+#endif
+            }
+
+            /* Headless exit: save screenshot and quit */
+            if (headless && frame_count >= headless_frames)
+            {
+                write_ppm(shot_path, fb, LCD_W, LCD_H);
+#ifdef HW_V2
+                /* Dump first 64 bytes of PSRAM model (= bytes 0..63 of game_t,
+                 * which is board[0][0..15] = 16 ints).  Should be all zeros
+                 * after game_init runs.  Then last 32 bytes (cursor/turn area). */
+                auto* r = top->rootp;
+                auto& pmem = r->soc__DOT__psram_chip0__DOT__mem;
+                bool qmode  = r->soc__DOT__psram_chip0__DOT__qpi_mode;
+                fprintf(stderr, "PSRAM model: qpi_mode=%d\n", qmode);
+                /* CPU address 0x100000 maps directly to PSRAM byte 0x100000
+                 * (chip has 8 MB = 23-bit addressing; high bits are ignored). */
+                fprintf(stderr, "PSRAM bytes @ 0x100000..0x10003F (board[0][0..15], should be 0):\n  ");
+                for (int i = 0; i < 64; i++) {
+                    fprintf(stderr, "%02x ", pmem[0x100000 + i] & 0xFF);
+                    if ((i & 15) == 15 && i < 63) fprintf(stderr, "\n  ");
+                }
+                fprintf(stderr, "\nPSRAM bytes @ 0x100380..0x10039F (board[14][14] + cursor/turn area):\n  ");
+                for (int i = 0; i < 32; i++) {
+                    fprintf(stderr, "%02x ", pmem[0x100380 + i] & 0xFF);
+                    if ((i & 15) == 15 && i < 31) fprintf(stderr, "\n  ");
+                }
+                fprintf(stderr, "\n");
+#endif
+                running = false;
+            }
 
             /* Handle SDL events once per simulated frame */
             SDL_Event ev;

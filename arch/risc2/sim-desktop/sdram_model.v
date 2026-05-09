@@ -103,6 +103,20 @@ module sdram(
     reg        bursting;
     reg        writing;         /* 1=write burst, 0=read burst */
 
+    /* Per-burst latched inputs.  Real sdram.v captures address/control at
+     * the start command; the master is then free to set up the *next*
+     * command on its own clock.  Without these latches, icache.v's quick
+     * start-write→start-write back-to-back (FS_WRITE_HI then FS_WRITE_LO)
+     * lets the model sample the wrong w_col / fill_const for the first
+     * burst.  Framebuffer prefetch is unaffected because dcache holds its
+     * inputs stable across the burst. */
+    reg [ 9:0] r_col_lat,  w_col_lat;
+    reg [ 9:0] r_stop_lat, w_stop_lat;
+    reg [14:0] r_row_lat,  w_row_lat;
+    reg [15:0] fill_const_lat;
+    reg        fill_en_lat;
+    reg [ 9:0] w_addr_start_lat;
+
     /* Pipeline registers for write path: 1-cycle delay matches real sdram.v
      * (write_burst2 and synchronous BRAM read latency in gpu3d.v). */
     reg [15:0] wr_data_r;       /* registered pixel data (fill_const or bram_do) */
@@ -142,7 +156,8 @@ module sdram(
         if (!bursting)
             rdy <= 1'b1;
 
-        /* Detect start_read toggle → begin read burst */
+        /* Detect start_read toggle → begin read burst.  Latch inputs here
+         * so a same-cycle change on the master side does not feed the burst. */
         if (!bursting && (start_read != start_read0))
         begin
             start_read0 <= start_read;
@@ -150,48 +165,66 @@ module sdram(
             burst_cnt   <= 10'h0;
             rdy         <= 1'b0;
             writing     <= 1'b0;
+            r_row_lat   <= r_row;
+            r_col_lat   <= r_col;
+            r_stop_lat  <= r_stop;
         end
         else if (!bursting && (start_write != start_write0))
         begin
-            start_write0 <= start_write;
-            bursting     <= 1'b1;
-            burst_cnt    <= w_addr_start;
-            rdy          <= 1'b0;
-            writing      <= 1'b1;
+            start_write0     <= start_write;
+            bursting         <= 1'b1;
+            burst_cnt        <= w_addr_start;
+            rdy              <= 1'b0;
+            writing          <= 1'b1;
+            w_row_lat        <= w_row;
+            w_col_lat        <= w_col;
+            w_stop_lat       <= w_stop;
+            fill_en_lat      <= fill_en;
+            fill_const_lat   <= fill_const;
+            w_addr_start_lat <= w_addr_start;
         end
 
-        /* Burst: one pixel per clock */
+        /* Burst: one pixel per clock.  Use the per-burst latches so the
+         * master can set up the next command without disturbing this one. */
         if (bursting)
         begin
             if (!writing)
             begin
-                /* READ: drive bram_we/r_addr/bram_di for the LCD line buffer */
+                /* READ: drive bram_we/r_addr/bram_di for the LCD line buffer.
+                 * Index mem from r_col_lat + burst_cnt — full-row prefetch
+                 * still works (r_col_lat=0), and icache.v's data fills with
+                 * non-zero r_col now hit the right row offsets. */
                 bram_we <= 1'b1;
                 r_addr  <= burst_cnt;
-                bram_di <= mem[{r_row[9:0], burst_cnt[8:0]}];
+                bram_di <= mem[{r_row_lat[9:0], r_col_lat[8:0] + burst_cnt[8:0]}];
             end
             else
             begin
-                /* WRITE: present w_addr so the GPU pixel BRAM can be read.
-                 * The actual memory write is done one cycle later (wr_valid path
-                 * below) to model the 1-cycle synchronous BRAM read latency in
-                 * gpu3d.v, matching write_burst2 in the real sdram.v. */
                 w_addr  <= burst_cnt;
                 bram_we <= 1'b0;
-                /* Pipeline: latch address and data for the delayed write */
                 wr_valid  <= 1'b1;
-                wr_col_r  <= w_col[8:0] + burst_cnt[8:0] - w_addr_start[8:0];
-                wr_row_r  <= w_row[9:0];
-                wr_data_r <= fill_en ? fill_const : bram_do;
+                wr_col_r  <= w_col_lat[8:0] + burst_cnt[8:0] - w_addr_start_lat[8:0];
+                wr_row_r  <= w_row_lat[9:0];
+                wr_data_r <= fill_en_lat ? fill_const_lat : bram_do;
             end
 
             burst_cnt <= burst_cnt + 1;
 
-            if (burst_cnt == (writing ? w_stop : r_stop))
+            /* Reads: terminate after (r_stop_lat - r_col_lat) since burst_cnt
+             * is now an offset within the requested window.  Writes: keep
+             * the existing absolute compare (w_addr_start handles the offset).
+             *
+             * Off-by-one fix: do NOT deassert bram_we here.  The
+             * `bram_we <= 1` and `bram_di <= mem[...]` above have just
+             * scheduled the LAST halfword for next cycle — letting them
+             * propagate ensures icache.v's burst counter sees all 8
+             * halfwords (and the framebuffer's last pixel of the row gets
+             * latched too).  bram_we drops in the `else` branch below the
+             * cycle after, when !bursting. */
+            if (burst_cnt == (writing ? w_stop_lat : (r_stop_lat - r_col_lat)))
             begin
                 bursting <= 1'b0;
                 writing  <= 1'b0;
-                bram_we  <= 1'b0;
                 rdy      <= 1'b1;
             end
         end

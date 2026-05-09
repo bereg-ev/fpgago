@@ -1,5 +1,10 @@
-/*
+`include "project.vh"
 
+/*
+ * Address decoding (per-arch values from project.vh):
+ *   ctrl_addr[23:16] == `MEM_LCD_CHAR_TEXT_PFX8 -> text RAM
+ *   ctrl_addr[23:16] == `MEM_LCD_CHAR_FONT_PFX8 -> font RAM
+ *   ctrl_addr[23:8]  == `MEM_LCD_CHAR_CFG_PFX16 -> display config
  */
 
 module lcd_char(
@@ -109,8 +114,8 @@ module lcd_char(
 		ctrl_we_2 <= ctrl_we;
 		ctrl_addr_d <= ctrl_addr;
 		ctrl_data_d <= ctrl_data;
-		txt_ena <= ctrl_addr[23:16] == 8'h0e;	// text RAM
-		chr_ena <= ctrl_addr[23:16] == 8'h0d;	// font ROM
+		txt_ena <= ctrl_addr[23:16] == `MEM_LCD_CHAR_TEXT_PFX8;
+		chr_ena <= ctrl_addr[23:16] == `MEM_LCD_CHAR_FONT_PFX8;
 
 	  if (hit & dx_en)
 	  begin
@@ -217,8 +222,8 @@ module lcd_char(
 	  enabled <= 0;
   end else
   begin
-	  /* CPU can write x/y/chnumx/chnumy at ctrl_addr[23:16] == 8'h0c */
-	  if (ctrl_we && ctrl_addr[23:16] == 8'h0c)
+	  /* CPU can write x/y/chnumx/chnumy at MEM_LCD_CHAR_CFG_PFX16 */
+	  if (ctrl_we && ctrl_addr[23:8] == `MEM_LCD_CHAR_CFG_PFX16)
 	  begin
 	    case (ctrl_addr[2:0])
 		    3'd0: x       <= ctrl_data[10:0];

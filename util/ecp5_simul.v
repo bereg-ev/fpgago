@@ -21,6 +21,57 @@ assign Z = A;
 
 endmodule
 
+/* EHXPLLL stub for simulation.  CLKOP just mirrors CLKI — the testbench
+ * drives the actual fast clock via the soc's psram_clk port directly.
+ * All parameters are accepted and ignored. */
+module EHXPLLL #(
+    parameter CLKI_DIV     = 1,
+    parameter CLKFB_DIV    = 1,
+    parameter CLKOP_DIV    = 1,
+    parameter CLKOS_DIV    = 1,
+    parameter CLKOS2_DIV   = 1,
+    parameter CLKOS3_DIV   = 1,
+    parameter CLKOP_ENABLE = "ENABLED",
+    parameter CLKOS_ENABLE = "DISABLED",
+    parameter CLKOS2_ENABLE= "DISABLED",
+    parameter CLKOS3_ENABLE= "DISABLED",
+    parameter FEEDBK_PATH  = "CLKOP",
+    parameter CLKOP_FPHASE = 0,
+    parameter CLKOP_CPHASE = 0,
+    parameter CLKOS_FPHASE = 0,
+    parameter CLKOS_CPHASE = 0,
+    parameter CLKOS2_FPHASE = 0,
+    parameter CLKOS2_CPHASE = 0,
+    parameter CLKOS3_FPHASE = 0,
+    parameter CLKOS3_CPHASE = 0
+)(
+    input  CLKI,
+    input  CLKFB,
+    output CLKOP,
+    output CLKOS,
+    output CLKOS2,
+    output CLKOS3,
+    input  RST,
+    input  STDBY,
+    input  PHASESEL0,
+    input  PHASESEL1,
+    input  PHASEDIR,
+    input  PHASESTEP,
+    input  PHASELOADREG,
+    input  PLLWAKESYNC,
+    input  ENCLKOP,
+    input  ENCLKOS,
+    input  ENCLKOS2,
+    input  ENCLKOS3,
+    output LOCK
+);
+    assign CLKOP  = CLKI;
+    assign CLKOS  = CLKI;
+    assign CLKOS2 = CLKI;
+    assign CLKOS3 = CLKI;
+    assign LOCK   = 1'b1;
+endmodule
+
 module ram_1k_18 (
     input wire clk_a,            // Clock for Port A
     input wire we_a,             // Write enable for Port A

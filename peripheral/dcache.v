@@ -73,8 +73,8 @@ localparam S_CLEAR_KICK  = 3'd5;   // CLEAR: trigger row fill
 localparam S_CLEAR_NEXT  = 3'd6;   // CLEAR: next row or done
 
 // ── Address decode ────────────────────────────────────────────────────────────
-wire buf_sel  = ctrl_we && (ctrl_addr[23:20] == 4'h2);     // 0x200000-0x2FFFFF
-wire mmio_sel = ctrl_we && (ctrl_addr[23:8] == 16'h0A00);  // 0x0A0000-0x0A00FF
+wire buf_sel  = ctrl_we && (ctrl_addr[23:20] == `MEM_FB_PFX4);
+wire mmio_sel = ctrl_we && (ctrl_addr[23:8] == `MEM_GPU_PFX16);
 wire [3:0] reg_idx = ctrl_addr[5:2];
 wire [8:0] buf_col = ctrl_addr[10:2];   // word-addressed column index
 
@@ -159,7 +159,7 @@ sdram sdram_y(
     .w_addr(w_addr_out),    .r_addr(bram_r_addr),
     .w_stop(w_stop_r),      .w_col(w_col_r),
     .w_addr_start(chunk_col),
-    .r_col(12'b0),          .r_stop(12'd63),    /* DEBUG: short burst like stable version */
+    .r_col(12'b0),          .r_stop(12'd479),   /* read a full LCD row (480 px) per scanline */
     .fill_en(fill_en_r),    .fill_const(fill_const_r),
     .sd_cke(sd_cke),        .sd_cs(sd_cs),
     .sd_ras(sd_ras),        .sd_cas(sd_cas),                .sd_we(sd_we),

@@ -1,0 +1,254 @@
+## ----------------------------------------------------------------------------
+## project-risc2-video-hw2.lpf
+##
+## Hardware version 2 (kicad-git/fpga-gameconsole-2): single DDR3 SDRAM
+##   (Winbond W631GG6MB-12, 1 Gb x16, 96-ball TFBGA) replacing the two
+##   SDR SDRAMs of HW v1.
+##
+## Status: DDR3 pin assignments extracted from fpga-gameconsole-2/fpga.kicad_sch
+## (cross-validated against trellis iodb -- DQS groups verified, see below).
+##
+## NON-DDR3 pin assignments below were copied from project-risc2-video-hw1.lpf
+## as a starting point.  Schematic differences known:
+##   * BTN-ENTER and BTN-CTRL were planned to move from T14/T15 to PT pins
+##     (the original PR pins now host DDR3 DQ signals).  Re-verify any non-DDR3
+##     pin against fpga-gameconsole-2/fpga.kicad_sch before trusting it.
+##
+## DDR3_RESET_N was an unrouted dangling label in the v2 schematic at the time
+## the pinout was extracted -- a free pin must be assigned in the schematic
+## first; placeholder used here is "??" (left commented out) -- update.
+## ----------------------------------------------------------------------------
+
+LOCATE COMP "i2s_data" SITE "B1";
+IOBUF PORT "i2s_data" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "i2s_mclk" SITE "D1";
+IOBUF PORT "i2s_mclk" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "i2s_lrck" SITE "C1";
+IOBUF PORT "i2s_lrck" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "i2s_bclk" SITE "C2";
+IOBUF PORT "i2s_bclk" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "i2s_en" SITE "E2";
+IOBUF PORT "i2s_en" IO_TYPE=LVCMOS33;
+
+
+LOCATE COMP "led1" SITE "A2";
+IOBUF PORT "led1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "led2" SITE "A3";
+IOBUF PORT "led2" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "tx" SITE "R4";
+IOBUF PORT "tx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "rx" SITE "T4";
+IOBUF PORT "rx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "dbg1" SITE "R4";
+IOBUF PORT "dbg1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "dbg2" SITE "T4";
+IOBUF PORT "dbg1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "lcd_clk" SITE "J3";
+IOBUF PORT "lcd_clk" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_pwm" SITE "N4";
+IOBUF PORT "lcd_pwm" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_hsync" SITE "L5";
+IOBUF PORT "lcd_hsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_vsync" SITE "P1";
+IOBUF PORT "lcd_vsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_de" SITE "P3";
+IOBUF PORT "lcd_de" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[15]" SITE "E1";
+IOBUF PORT "lcd_data[15]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[14]" SITE "F2";
+IOBUF PORT "lcd_data[14]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[13]" SITE "F1";
+IOBUF PORT "lcd_data[13]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[12]" SITE "G2";
+IOBUF PORT "lcd_data[12]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[11]" SITE "G1";
+IOBUF PORT "lcd_data[11]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[10]" SITE "H2";
+IOBUF PORT "lcd_data[10]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[9]" SITE "J2";
+IOBUF PORT "lcd_data[9]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[8]" SITE "J1";
+IOBUF PORT "lcd_data[8]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[7]" SITE "K2";
+IOBUF PORT "lcd_data[7]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[6]" SITE "K1";
+IOBUF PORT "lcd_data[6]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[5]" SITE "L2";
+IOBUF PORT "lcd_data[5]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[4]" SITE "L1";
+IOBUF PORT "lcd_data[4]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[3]" SITE "M2";
+IOBUF PORT "lcd_data[3]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[2]" SITE "M1";
+IOBUF PORT "lcd_data[2]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[1]" SITE "N1";
+IOBUF PORT "lcd_data[1]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[0]" SITE "P2";
+IOBUF PORT "lcd_data[0]" IO_TYPE=LVCMOS33;
+
+## ----------------------------------------------------------------------------
+## DDR3 SDRAM -- Winbond W631GG6MB-12 (1Gb, x16) on bank 2 / bank 3 (1.5 V VCCIO)
+##
+## DQS groups (validated against prjtrellis iodb for CABGA256, LFE5U-25F):
+##   - Lower byte  (DQ0..7, DQSL_P/N, DML): all in DQS group RDQ44 / RDQS44 (bank 3) -- OK
+##   - Upper byte  (DQ8..15, DQSU_P/N, DMU): all in DQS group RDQ20 / RDQS20 (bank 2) -- OK
+##   - CK_P/CK_N at L16/L15: true differential A/B pair on bank 3            -- OK
+##   - Address/command on banks 2/3                                          -- OK
+##
+## I/O standard: SSTL15_I (DDR3 1.5 V single-ended).  Differential pairs use
+## SSTL15D_I.  Adjust if board is jumpered for DDR3L (1.35 V): use SSTL135.
+## ----------------------------------------------------------------------------
+
+# Address (A0..A12)
+LOCATE COMP "ddr3_a[0]"  SITE "F15";
+LOCATE COMP "ddr3_a[1]"  SITE "M15";
+LOCATE COMP "ddr3_a[2]"  SITE "E15";
+LOCATE COMP "ddr3_a[3]"  SITE "D16";
+LOCATE COMP "ddr3_a[4]"  SITE "R16";
+LOCATE COMP "ddr3_a[5]"  SITE "D14";
+LOCATE COMP "ddr3_a[6]"  SITE "P16";
+LOCATE COMP "ddr3_a[7]"  SITE "E16";
+LOCATE COMP "ddr3_a[8]"  SITE "P15";
+LOCATE COMP "ddr3_a[9]"  SITE "F16";
+LOCATE COMP "ddr3_a[10]" SITE "F12";
+LOCATE COMP "ddr3_a[11]" SITE "N16";
+LOCATE COMP "ddr3_a[12]" SITE "G12";
+IOBUF PORT "ddr3_a[0]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[1]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[2]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[3]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[4]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[5]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[6]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[7]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[8]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[9]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[10]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[11]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[12]" IO_TYPE=SSTL15_I;
+
+# Bank address (BA0..BA2)
+LOCATE COMP "ddr3_ba[0]" SITE "C15";
+LOCATE COMP "ddr3_ba[1]" SITE "M16";
+LOCATE COMP "ddr3_ba[2]" SITE "J16";
+IOBUF PORT "ddr3_ba[0]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_ba[1]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_ba[2]" IO_TYPE=SSTL15_I;
+
+# Command / control
+LOCATE COMP "ddr3_ras_n" SITE "B15";
+LOCATE COMP "ddr3_cas_n" SITE "C14";
+LOCATE COMP "ddr3_we_n"  SITE "J15";
+LOCATE COMP "ddr3_cs_n"  SITE "C16";
+LOCATE COMP "ddr3_cke"   SITE "F13";
+LOCATE COMP "ddr3_odt"   SITE "B16";
+IOBUF PORT "ddr3_ras_n" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cas_n" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_we_n"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cs_n"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cke"   IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_odt"   IO_TYPE=SSTL15_I;
+
+# RESET# -- not yet routed in the v2 schematic (dangling label).
+# Pick a free pin in the schematic, then uncomment and edit:
+# LOCATE COMP "ddr3_reset_n" SITE "??";
+# IOBUF PORT "ddr3_reset_n" IO_TYPE=LVCMOS15;
+
+# Differential clock (true diff pair: bank 3, pio A/B)
+LOCATE COMP "ddr3_ck_p" SITE "L16";
+LOCATE COMP "ddr3_ck_n" SITE "L15";
+IOBUF PORT "ddr3_ck_p" IO_TYPE=SSTL15D_I;
+IOBUF PORT "ddr3_ck_n" IO_TYPE=SSTL15D_I;
+
+# Lower byte data (DQS group RDQ44, bank 3)
+LOCATE COMP "ddr3_dq[0]" SITE "M12";
+LOCATE COMP "ddr3_dq[1]" SITE "T15";
+LOCATE COMP "ddr3_dq[2]" SITE "P12";
+LOCATE COMP "ddr3_dq[3]" SITE "T14";
+LOCATE COMP "ddr3_dq[4]" SITE "P14";
+LOCATE COMP "ddr3_dq[5]" SITE "N13";
+LOCATE COMP "ddr3_dq[6]" SITE "P13";
+LOCATE COMP "ddr3_dq[7]" SITE "R13";
+IOBUF PORT "ddr3_dq[0]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[1]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[2]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[3]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[4]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[5]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[6]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[7]" IO_TYPE=SSTL15_I;
+
+LOCATE COMP "ddr3_dqs_p[0]" SITE "R12";
+LOCATE COMP "ddr3_dqs_n[0]" SITE "T13";
+IOBUF PORT "ddr3_dqs_p[0]" IO_TYPE=SSTL15D_I;
+IOBUF PORT "ddr3_dqs_n[0]" IO_TYPE=SSTL15D_I;
+
+LOCATE COMP "ddr3_dm[0]" SITE "R14";
+IOBUF PORT "ddr3_dm[0]" IO_TYPE=SSTL15_I;
+
+# Upper byte data (DQS group RDQ20, bank 2)
+LOCATE COMP "ddr3_dq[8]"  SITE "H12";
+LOCATE COMP "ddr3_dq[9]"  SITE "K15";
+LOCATE COMP "ddr3_dq[10]" SITE "H13";
+LOCATE COMP "ddr3_dq[11]" SITE "K16";
+LOCATE COMP "ddr3_dq[12]" SITE "J13";
+LOCATE COMP "ddr3_dq[13]" SITE "J14";
+LOCATE COMP "ddr3_dq[14]" SITE "J12";
+LOCATE COMP "ddr3_dq[15]" SITE "H14";
+IOBUF PORT "ddr3_dq[8]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[9]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[10]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[11]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[12]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[13]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[14]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[15]" IO_TYPE=SSTL15_I;
+
+LOCATE COMP "ddr3_dqs_p[1]" SITE "G16";
+LOCATE COMP "ddr3_dqs_n[1]" SITE "H15";
+IOBUF PORT "ddr3_dqs_p[1]" IO_TYPE=SSTL15D_I;
+IOBUF PORT "ddr3_dqs_n[1]" IO_TYPE=SSTL15D_I;
+
+LOCATE COMP "ddr3_dm[1]" SITE "K14";
+IOBUF PORT "ddr3_dm[1]" IO_TYPE=SSTL15_I;
+
+## ----------------------------------------------------------------------------
+## QSPI PSRAM -- AP Memory APS6404L-3SQN-SN (8 MB, 8-SOP)
+## Pin mapping extracted from fpga-gameconsole-2/fpga-gameconsole.kicad_pcb:
+##   PSRAM-pin   net              FPGA ball   FPGA pin function
+##   1  CE#      SPI_SRAM_CE      B4          PT11B
+##   6  SCLK     SPI_SRAM_SCLK    B6          PT22B
+##   5  SI/SIO0  SPI_SRAM_SIO0    A6          PT18B
+##   2  SO/SIO1  SPI_SRAM_SIO1    B5          PT15B
+##   3  SIO2     SPI_SRAM_SIO2    A5          PT18A
+##   7  SIO3     SPI_SRAM_SIO3    A4          PT6B
+## All on bank 1, 3.3 V.
+## ----------------------------------------------------------------------------
+
+LOCATE COMP "psram_ce_n" SITE "B4";
+IOBUF PORT "psram_ce_n" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_sclk" SITE "B6";
+IOBUF PORT "psram_sclk" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_sio0" SITE "A6";
+IOBUF PORT "psram_sio0" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_sio1" SITE "B5";
+IOBUF PORT "psram_sio1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_sio2" SITE "A5";
+IOBUF PORT "psram_sio2" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_sio3" SITE "A4";
+IOBUF PORT "psram_sio3" IO_TYPE=LVCMOS33;

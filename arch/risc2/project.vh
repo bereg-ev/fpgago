@@ -18,7 +18,6 @@
 `define SD_WIDTH          16
 `define BRAM_ADDR_WIDTH   12
 
-/* GPU3D base address (MMIO, word-addressed, 10 registers) */
-`define GPU3D_BASE        24'h0A0000
+`include "memmap.vh"
 
 

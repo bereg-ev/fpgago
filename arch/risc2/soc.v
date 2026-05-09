@@ -27,6 +27,17 @@ module soc(
     output lcd_pwm,
     output lcd_clk,
 
+`ifdef HW_V2
+    /* HW=v2: PSRAM (APS6404L) on the pins formerly used by the X SDRAM.
+     * Both X-SDRAM and Y-SDRAM (framebuffer) chips are gone in v2 hardware;
+     * Y-SDRAM is replaced by DDR3 (driver TBD), so its bus is also dropped. */
+    output psram_sclk,
+    output psram_ce_n,
+    inout  psram_sio0,
+    inout  psram_sio1,
+    inout  psram_sio2,
+    inout  psram_sio3
+`else
     output xclk,
     output xcke,
     output xcs,
@@ -50,6 +61,7 @@ module soc(
     output [1:0] yba,
     output yldqm,
     output yudqm
+`endif
     );
 
     wire [23:0] instr_addr;
@@ -212,7 +224,7 @@ module soc(
     /* Data RAM: 4 byte-lane BRAMs, write-enabled independently via
      * data_out_strobe[3:0] from the CPU. */
     wire [9:0] dummy_b0, dummy_b1, dummy_b2, dummy_b3;
-    wire dataram_wr = data_wr & (data_addr[23:16] == 8'h01);
+    wire dataram_wr = data_wr & (data_addr[23:16] == `MEM_BRAM_PFX8);
 
 `ifdef EXTENDED_MEM
     /* 4K words per lane (16KB total) */
@@ -332,8 +344,8 @@ module soc(
     wire        icache_valid;
     wire        icache_wr_busy;
 
-    /* X SDRAM address range: 0x100000–0x1FFFFF */
-    wire sdram_data_range = (data_addr[23:20] == 4'h1);
+    /* X SDRAM (HW v1) / QSPI SRAM (HW v2) address range: 0x100000–0x1FFFFF */
+    wire sdram_data_range = (data_addr[23:20] == `MEM_EXT_RAM_PFX4);
 
     /* Data cache outputs */
     wire [31:0] icache_data_out;
@@ -371,8 +383,52 @@ module soc(
         .cpuDbg(cpuDbg)
     );
 
+`ifndef HW_V2
     assign xclk = clk;
+`endif
 
+`ifdef HW_V2
+    /* HW=v2: external memory is an APS6404L QSPI PSRAM (single chip).
+     * Same CPU-side interface as icache — only the physical bus changes. */
+    psram_iface psram_iface0(
+        .clk(clk), .rst(rst),
+        .cpu_addr(instr_addr),
+        .cpu_instr(icache_instr),
+        .cpu_valid(icache_valid),
+        .rom_data(instr_data),
+        .wr_addr(24'b0),
+        .wr_data(32'b0),
+        .wr_en(1'b0),
+        .wr_busy(icache_wr_busy),
+        .data_addr(data_addr),
+        .data_rd(data_rd && sdram_data_range),
+        .data_wr_val(data_out_value),
+        .data_wr_strobe(data_out_strobe),
+        .data_wr_en(data_wr && sdram_data_range),
+        .data_out(icache_data_out),
+        .data_valid(icache_data_valid),
+        .data_wr_busy(icache_data_wr_busy),
+        .psram_sclk(psram_sclk),
+        .psram_ce_n(psram_ce_n),
+        .psram_sio0(psram_sio0),
+        .psram_sio1(psram_sio1),
+        .psram_sio2(psram_sio2),
+        .psram_sio3(psram_sio3),
+        .dbg(icache_dbg)
+    );
+  `ifdef SIMULATION
+    /* Sim-only: loop the PSRAM bus back through the behavioral chip model so
+     * verilator/iverilog actually exercises the protocol round-trip. */
+    psram_chip_model psram_chip0(
+        .psram_sclk(psram_sclk),
+        .psram_ce_n(psram_ce_n),
+        .psram_sio0(psram_sio0),
+        .psram_sio1(psram_sio1),
+        .psram_sio2(psram_sio2),
+        .psram_sio3(psram_sio3)
+    );
+  `endif
+`else
     icache icache0(
         .clk(clk), .rst(rst),
         .cpu_addr(instr_addr),
@@ -398,11 +454,29 @@ module soc(
         .sd_a(xa), .sd_d(xd), .sd_ba(xba), .sd_ldqm(xldqm), .sd_udqm(xudqm),
         .dbg(icache_dbg)
     );
+`endif
 
-    /* Y SDRAM: memory-mapped framebuffer with write-combining cache */
+    /* Y SDRAM: memory-mapped framebuffer with write-combining cache.
+     *
+     * In HW=v2 the physical FB SDRAM chip is gone (replaced on the v2 board
+     * by DDR3, which has no driver yet) — but in *simulation* the framebuffer
+     * is purely virtual: dcache instantiates `sdram` internally, and
+     * sdram_model.v provides that.  So we keep dcache instantiated
+     * unconditionally and route its bus to either the top-level y-bus
+     * ports (HW_V1) or to internal dangling wires (HW_V2).  On a real
+     * v2 board those wires go nowhere — synth optimises them out. */
     wire gpu_busy;
     wire [7:0] y_sdram_dbg;
     wire [7:0] y_prefetch_dbg;
+
+`ifdef HW_V2
+    /* Internal y-bus stubs — no top-level pins under HW_V2. */
+    wire        ycke, ycs, yras, ycas, ywe, yldqm, yudqm;
+    wire [12:0] ya;
+    wire [15:0] yd;
+    wire [1:0]  yba;
+`endif
+
     dcache dcache0(
         .clk(clk), .rst(rst),
         .row(lcd_row), .col(lcd_col),
@@ -418,7 +492,7 @@ module soc(
     );
 
     /* ── Audio synthesizer (3-channel, SID-style) ──────────────────────── */
-    wire audio_range = (data_addr[23:4] == 20'h0B000);   /* 0x0B0000..0x0B000F */
+    wire audio_range = (data_addr[23:8] == `MEM_AUDIO_PFX16);   /* 0x008400..0x0084FF */
     wire [7:0] audio_rdata;
 
     audio audio0(
@@ -487,7 +561,7 @@ module soc(
 `endif
             data_in_value <= rom_out_value;
 
-        if (data_wr && data_addr == 24'hf0000)              // set bit port
+        if (data_wr && data_addr == `ADDR_SYS_LED_SET)
         begin
 	        if (data_out_value[0])
                 sled1 <= 1;
@@ -496,7 +570,7 @@ module soc(
                 sled2 <= 1;
         end
 
-        if (data_wr && data_addr == 24'hf0001)              // clear bit port
+        if (data_wr && data_addr == `ADDR_SYS_LED_CLR)
         begin
 	        if (data_out_value[0])
                 sled1 <= 0;
@@ -505,10 +579,10 @@ module soc(
                 sled2 <= 0;
         end
 
-        if (data_rd && data_addr == 24'hf0002)              // read bit port
+        if (data_rd && data_addr == `ADDR_UART_STATUS)
             data_in_value <= {5'b10000, txbusy, rxovf, rxrdy};
 
-        if (data_wr && data_addr == 24'hf0003)              // UART tx data port
+        if (data_wr && data_addr == `ADDR_UART_TX)
         begin
             txdata <= data_out_value;
             txen <= ~txen;
@@ -521,7 +595,7 @@ module soc(
         end
 `endif
 
-        if (data_rd && data_addr == 24'hf0004)              // UART rx data port
+        if (data_rd && data_addr == `ADDR_UART_RX)
         begin
             data_in_value <= rxdata;
             rxrdy <= 0;
@@ -545,15 +619,15 @@ module soc(
 `endif
             data_in_value <= rom_out_value;
 
-        if (data_rd2 && data_addr[23:16] == 8'h01)
+        if (data_rd2 && data_addr[23:16] == `MEM_BRAM_PFX8)
             data_in_value <= dataram_out;
 
-        /* dcache STATUS register: addr 0x0A0024 (n=9, byte offset 9*4=0x24)
+        /* dcache STATUS register (reg 9, byte offset 9*4=0x24)
            Returns: [7:1] = Y SDRAM debug {read,write,init,initialized,rdy}, [0] = gpu_busy */
-        if (data_rd && data_addr == 24'h0A0024)
+        if (data_rd && data_addr == `ADDR_GPU_STATUS)
             data_in_value <= {24'b0, y_sdram_dbg, gpu_busy};
 
-        if (data_rd && data_addr == 24'hf0010)               // icache write busy
+        if (data_rd && data_addr == `ADDR_SYS_ICACHE_BUSY)
             data_in_value <= {31'b0, icache_wr_busy};
 
         if (data_rd && audio_range)                          // audio status register

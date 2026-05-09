@@ -18,3 +18,9 @@
 `define UART_BIT_TIME       165
 `define TIMER_PRESCALE      24'd100000
 `endif
+
+/* ---- lcd_char.v address-decode macros (parameterised so the same module
+ *      serves both risc1 and risc2 with different memory maps) ---------- */
+`define MEM_LCD_CHAR_TEXT_PFX8   8'h0E   /* text RAM at  0x0E0000.. (legacy) */
+`define MEM_LCD_CHAR_FONT_PFX8   8'h0D   /* font RAM at  0x0D0000.. (legacy) */
+`define MEM_LCD_CHAR_CFG_PFX16   16'h0C00 /* config at   0x0C0000..0x0C00FF (legacy: was 0x0C0000..0x0CFFFF; tightened to 256 B) */

@@ -19,6 +19,16 @@ UTIL = $(REPO)/util
 PERI = $(REPO)/peripheral
 PROJ = ..
 
+# ── Hardware version (HW=v1 default | HW=v2 selects PSRAM path) ─────────────
+HW ?= v1
+ifeq ($(HW),v2)
+  HW_DEFINE = -DHW_V2
+  HW_VSRCS  = $(PERI)/psram.v $(PERI)/psram_iface.v psram_model.v
+else
+  HW_DEFINE = -DHW_V1
+  HW_VSRCS  =
+endif
+
 # ── Verilator flags ─────────────────────────────────────────────────────────
 VFLAGS = \
     --cc \
@@ -27,6 +37,7 @@ VFLAGS = \
     --top-module soc \
     -DSIMULATION \
     -DSIMULATION_SDL \
+    $(HW_DEFINE) \
     -I$(CPU) \
     -I$(PROJ) \
     --Mdir obj_dir \
@@ -43,12 +54,13 @@ VFLAGS = \
     -Wno-INITIALDLY \
     -Wno-UNSIGNED \
     -Wno-IMPLICIT \
-    -CFLAGS  "$(shell sdl2-config --cflags) -DSIM_TITLE='\"$(or $(SIM_GAME),FPGAgo) — $(or $(SIM_ARCH),risc2) (ESC=quit)\"'" \
+    -CFLAGS  "$(shell sdl2-config --cflags) $(HW_DEFINE) -DSIM_TITLE='\"$(or $(SIM_GAME),FPGAgo) — $(or $(SIM_ARCH),risc2) (ESC=quit)\"'" \
     -LDFLAGS "$(shell sdl2-config --libs)"
 
 # ── Verilog source list ──────────────────────────────────────────────────────
 # sdram_model.v is listed INSTEAD OF $(PERI)/sdram.v (stub replacement).
 # ecp5_simul.v provides simulation stubs for ECP5 primitives (OSCG etc.).
+# psram.v + psram_iface.v + psram_model.v are added when HW=v2.
 # The order matters: Verilator uses the first definition it sees.
 VSRCS = \
     $(PROJ)/soc.v \
@@ -65,6 +77,7 @@ VSRCS = \
     $(PERI)/timer.v \
     $(PERI)/icache.v \
     $(PERI)/dcache.v \
+    $(HW_VSRCS) \
     sdram_model.v
 
 # ── Targets ──────────────────────────────────────────────────────────────────

@@ -13,6 +13,10 @@
 #   fpga      — yosys/nextpnr synthesis to bitfile for real hardware
 #   gtkwave   — iverilog simulation to VCD waveform
 #
+# Hardware version (HW=, applies only to ARCH=risc2 + TARGET=fpga):
+#   v1        — two SDR SDRAMs (default), uses project-risc2-video-hw1.lpf
+#   v2        — single DDR3 + QSPI PSRAM, uses project-risc2-video-hw2.lpf
+#
 # Create & Manage:
 #   make copyarch SRC=<arch> DST=<name>                     — copy an architecture
 #   make delarch  ARCH=<name>                               — delete a user-created arch
@@ -74,6 +78,10 @@ help:
 	@printf "    fpga       Synthesize bitfile (yosys + nextpnr)\n"
 	@printf "    gtkwave    Waveform simulation (iverilog)\n"
 	@printf "\n"
+	@printf "\033[32m  Hardware version (HW=, ARCH=risc2 + TARGET=fpga only):\033[0m\n"
+	@printf "    v1         Two SDR SDRAMs (default)         project-risc2-video-hw1.lpf\n"
+	@printf "    v2         Single DDR3 + QSPI PSRAM         project-risc2-video-hw2.lpf\n"
+	@printf "\n"
 	@printf "\033[32m  Create & Manage:\033[0m\n"
 	@printf "    make copyarch SRC=<arch> DST=<name>            Copy an architecture\n"
 	@printf "    make delarch  ARCH=<name>                      Delete a user-created arch\n"
@@ -94,6 +102,7 @@ help:
 	@printf "\033[32m  Examples:\033[0m\n"
 	@printf "    make run   GAME=char-snake ARCH=risc1 TARGET=verilator\n"
 	@printf "    make run   GAME=tic-tac-toe TARGET=sdl2\n"
+	@printf "    make run   GAME=gomoku ARCH=risc2 TARGET=fpga HW=v2\n"
 	@printf "    make download-rom ARCH=spectrum\n"
 	@printf "    make run ARCH=pet\n"
 	@printf "\n"
