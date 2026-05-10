@@ -93,3 +93,6 @@ run: all
 
 clean:
 	rm -rf obj_dir
+	rm -f *.ppm *.log
+	# Stray gcasm output that landed here if the assembler was run from this dir
+	rm -f *.asm *.asm.tmp

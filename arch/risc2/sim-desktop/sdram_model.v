@@ -19,7 +19,7 @@
  *                                   accounted for by sampling one cycle after
  *                                   w_addr is presented, matching real sdram.v)
  *
- * Memory layout (must match gpu3d.v double-buffer addressing):
+ * Memory layout (must match dcache.v double-buffer addressing):
  *   Frame A: rows   0..271 (front when front_buf=0)
  *   Frame B: rows 512..783 (front when front_buf=1)
  *   Pixel(row, col) = mem[ {row[8:0], col[8:0]} ]
@@ -118,7 +118,7 @@ module sdram(
     reg [ 9:0] w_addr_start_lat;
 
     /* Pipeline registers for write path: 1-cycle delay matches real sdram.v
-     * (write_burst2 and synchronous BRAM read latency in gpu3d.v). */
+     * (write_burst2 and synchronous BRAM read latency in dcache.v). */
     reg [15:0] wr_data_r;       /* registered pixel data (fill_const or bram_do) */
     reg [ 8:0] wr_col_r;        /* registered write column */
     reg [ 9:0] wr_row_r;        /* registered write row (10-bit: includes front_buf) */

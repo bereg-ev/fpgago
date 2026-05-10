@@ -3,11 +3,11 @@
 /*
  * dcache.v — Memory-mapped framebuffer with write-combining cache
  *
- * Replaces gpu3d.v.  The CPU writes pixels directly to a scanline write
- * buffer (BRAM), sets the target row, and issues a FLUSH command.  The
- * dcache burst-writes the dirty portion of the buffer to Y SDRAM.
+ * The CPU writes pixels directly to a scanline write buffer (BRAM), sets
+ * the target row, and issues a FLUSH command.  The dcache burst-writes the
+ * dirty portion of the buffer to Y SDRAM.
  *
- * Double-buffered framebuffer layout (same as gpu3d.v):
+ * Double-buffered framebuffer layout:
  *   Frame A: Y SDRAM rows   0..271   (front when front_buf=0)
  *   Frame B: Y SDRAM rows 512..783   (front when front_buf=1)
  *
@@ -22,8 +22,6 @@
  * Notes:
  *   - FLUSH writes only the dirty column range (dirty_first..dirty_last).
  *   - Chunked writes: max 64 pixels per SDRAM burst so LCD reads interleave.
- *   - CLEAR_FB and SWAP_BUFFERS use the same command values as gpu3d.v,
- *     so character-LCD games (tic-tac-toe, char-gomoku) need no changes.
  *   - The write buffer is NOT cleared between flushes; the CPU must write
  *     every pixel it intends to flush.
  */
@@ -105,7 +103,7 @@ reg [8:0]  clear_row;
 // ── State register ───────────────────────────────────────────────────────────
 reg [2:0]  state;
 
-// ── LCD prefetch state (from gpu3d.v / lcd_sdram.v) ──────────────────────────
+// ── LCD prefetch state ───────────────────────────────────────────────────────
 reg [14:0] r_row_reg;
 reg        start_read, start_init;
 reg        init_sent;
@@ -133,7 +131,7 @@ ram_1k_18 wbuf(
     .addr_b(w_addr_out), .din_b(18'b0), .dout_b(wbuf_dout_b)
 );
 
-// ── LCD line-buffer ping-pong BRAM (from gpu3d.v, unchanged) ─────────────────
+// ── LCD line-buffer ping-pong BRAM ───────────────────────────────────────────
 wire buf_disp  = row[0];
 wire buf_fill  = ~row[0];
 wire [9:0] bram_addr_a = {buf_fill, bram_r_addr[8:0]};
@@ -204,7 +202,7 @@ end
 
 reg flush_reset_dirty;
 
-// ── LCD prefetch controller (from gpu3d.v, verbatim) ─────────────────────────
+// ── LCD prefetch controller ──────────────────────────────────────────────────
 always @(posedge clk or negedge rst)
 if (!rst) begin
     start_init<=0; start_read<=0; r_row_reg<=0;
@@ -318,7 +316,7 @@ end else begin
         end
     end
 
-    // ── CLEAR_FB: fill every row of back buffer (chunked, same as gpu3d) ────
+    // ── CLEAR_FB: fill every row of back buffer (chunked) ───────────────────
     S_CLEAR_WAIT: begin
         if (!write_pending) begin
             w_row_r      <= {5'b0, ~front_buf, clear_row};

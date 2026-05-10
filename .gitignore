@@ -1,3 +1,25 @@
+# ── Simulation / build artefacts ───────────────────────────────────────────
+# Verilator output and screenshots from sim-desktop runs.
+arch/risc2/sim-desktop/obj_dir/
+arch/risc2/sim-desktop/*.ppm
+arch/risc2/sim-desktop/*.log
+# gcasm sometimes leaves these in sim-desktop if invoked there.
+arch/risc2/sim-desktop/*.asm
+
+# Per-game build outputs (assembled ROMs).  main.asm is a generated artefact
+# for C-based games but is the hand-written source for psram_test, hence the
+# negation below.
+games/*/src/platform/risc2/rom.bin
+games/*/src/platform/risc2/rom.hex
+games/*/src/platform/risc2/romL*.vh
+games/*/src/platform/risc2/romH*.vh
+games/psram_test/src/platform/risc2/rom*.vh
+
+games/*/src/platform/risc2/*.asm
+games/*/src/platform/risc2/*.asm.tmp
+!games/psram_test/src/platform/risc2/main.asm
+
+
 # Prerequisites
 *.d
 

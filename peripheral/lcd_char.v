@@ -57,22 +57,21 @@ module lcd_char(
       .clk_b(clk), .we_b(1'b0), .addr_b(txt_addr[9:0]), .din_b(18'b0), .dout_b({dummy[1:0], txt0_dob})
     );
 
-		/* Font RAM — behavioral dual-port with $readmemh init.
-		   Using ram_1k_18 (inferred BRAM) instead of dual_port_ram_1k_18
-		   (explicit DP16KD _TECHMAP_REPLACE_) so yosys preserves the write port. */
-		reg [17:0] fontmem [0:1023];
-		initial $readmemh("ibm8x16.hex", fontmem);
-
-		reg [17:0] chr_dob_r;
-		assign chr_dob = chr_dob_r;
-
-		always @(posedge clk)
-		    if (ctrl_we_2 & chr_ena)
-		        fontmem[ctrl_addr_d[9:0]] <= {2'b0, ctrl_data_d};
-		    // no else-read on port A (write-only from CPU)
-
-		always @(posedge clk)
-		    chr_dob_r <= fontmem[{colorchar[6:0], dy[3:1]}];
+		/* Font RAM — explicit DP16KD with INITVAL_xx parameters from
+		   ibm8x16.vh.  Both arch/risc1/ and arch/risc2/ ship an identical
+		   ibm8x16.vh in their cwd at synthesis time, and yosys puts the init
+		   data straight into the bitstream — independent of $readmemh, which
+		   on this synthesis path was being silently dropped (leaving a blank
+		   font on real hardware).  Port A keeps the CPU's write path so games
+		   can still upload custom glyphs (e.g. char-gomoku's board cells). */
+		dual_port_ram_1k_18 #(
+		`include "ibm8x16.vh"
+		) fontmem_inst (
+		    .clk_a(clk), .we_a(ctrl_we_2 & chr_ena),
+		    .addr_a(ctrl_addr_d[9:0]), .din_a({2'b0, ctrl_data_d}), .dout_a(),
+		    .clk_b(clk), .we_b(1'b0),
+		    .addr_b({colorchar[6:0], dy[3:1]}), .din_b(18'b0), .dout_b(chr_dob)
+		);
 
 
 //	ramchr(.DOB(), .ADDRB(ctrl_addr[9:0]), .CLKB(clk), .DIB(ctrl_data), .ENB(chr_ena), .SSRB(1'b0), .WEB(ctrl_we & chr_ena),

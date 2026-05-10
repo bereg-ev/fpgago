@@ -54,11 +54,21 @@ MAKEOVERRIDES := $(filter-out TARGET=%,$(MAKEOVERRIDES))
 
 # ── Game/platform matrix ────────────────────────────────────────────────────
 GAMES_RISC1 = char-snake
-GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels sound-test
+GAMES_RISC2 = gomoku tic-tac-toe char-gomoku labyrinth chess hello-pixels
 GAMES_SDL2  = gomoku tic-tac-toe labyrinth char-gomoku chess hello-pixels
 
+# Test/diagnostic tools live under util/ — not games. Built only by request.
+UTIL_TOOLS = psram_test sound-test
+
+# Resolve a game's per-platform Makefile directory.  Prefers the new flat
+# layout (games/<game>/platforms/<arch>) and falls back to the legacy
+# nested layout (games/<game>/src/platform/<arch>) for un-migrated games.
+#   $(call gameplatdir,<game>,<arch>)
+gameplatdir = $(if $(wildcard games/$(1)/platforms/$(2)/Makefile),games/$(1)/platforms/$(2),games/$(1)/src/platform/$(2))
+
 .PHONY: help all build run clean all-sdl2 all-risc1 all-risc2 gcasm check-deps copyarch delarch newgame delgame \
-       download-rom download-cpu download-game run-game list-games
+       download-rom download-cpu download-game run-game list-games \
+       build-tool run-tool list-tools
 
 # ── Default target: show help ──────────────────────────────────────────────
 help:
@@ -95,6 +105,11 @@ help:
 	@printf "    make download-game ARCH=pet GAME=<name>        Download a game\n"
 	@printf "    make run-game      ARCH=pet GAME=<name>        Run a game\n"
 	@printf "    make list-games    ARCH=pet                    List available games\n"
+	@printf "\n"
+	@printf "\033[32m  Util Tools (RISC2 diagnostics, under util/<tool>/):\033[0m\n"
+	@printf "    make list-tools                                List available util tools\n"
+	@printf "    make build-tool TOOL=<name>                    Build a util tool ROM\n"
+	@printf "    make run-tool   TOOL=<name> TARGET=<t>         Build + run util tool\n"
 	@printf "\n"
 	@printf "\033[32m  Setup:\033[0m\n"
 	@printf "    make check-deps                                Check installed tools\n"
@@ -167,8 +182,8 @@ build: gcasm
 	@test -n "$(GAME)" || { echo "Usage: make build GAME=<game> [ARCH=<arch>] [TARGET=sdl2]"; exit 1; }
 	@if [ "$(TARGET)" = "sdl2" ]; then \
 	    echo "Building $(GAME) for SDL2..." && \
-	    if [ -d "games/$(GAME)/src/platform/sdl2" ] && [ -f "games/$(GAME)/src/platform/sdl2/Makefile" ]; then \
-	        $(MAKE) -C games/$(GAME)/src/platform/sdl2; \
+	    if [ -f "$(call gameplatdir,$(GAME),sdl2)/Makefile" ]; then \
+	        $(MAKE) -C $(call gameplatdir,$(GAME),sdl2); \
 	    else \
 	        $(MAKE) -C games/$(GAME); \
 	    fi; \
@@ -178,14 +193,14 @@ build: gcasm
 	    $(MAKE) -C games/$(GAME) copy && \
 	    if [ "$(TARGET)" = "fpga" ]; then \
 	        echo "Synthesizing for FPGA..." && \
-	        cd arch/risc1 && bash run.sh; \
+	        cd arch/risc1 && HW=$(HW) bash run.sh; \
 	    fi; \
 	elif [ -n "$(ARCH)" ]; then \
 	    echo "Building $(GAME) for $(ARCH)..." && \
 	    if [ "$(TARGET)" = "fpga" ]; then \
-	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-fpga; \
+	        $(MAKE) -C $(call gameplatdir,$(GAME),$(ARCH)) run-fpga; \
 	    else \
-	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH); \
+	        $(MAKE) -C $(call gameplatdir,$(GAME),$(ARCH)); \
 	    fi; \
 	else \
 	    echo "Error: specify ARCH=<arch> or TARGET=sdl2"; exit 1; \
@@ -200,8 +215,8 @@ run:
 	fi; \
 	$(MAKE) build GAME=$(GAME) ARCH=$(ARCH) TARGET=$(TARGET); \
 	if [ "$(TARGET)" = "sdl2" ]; then \
-	    if [ -d "games/$(GAME)/src/platform/sdl2" ] && [ -f "games/$(GAME)/src/platform/sdl2/Makefile" ]; then \
-	        cd games/$(GAME)/src/platform/sdl2 && ./$(GAME)$(EXEEXT); \
+	    if [ -f "$(call gameplatdir,$(GAME),sdl2)/Makefile" ]; then \
+	        cd $(call gameplatdir,$(GAME),sdl2) && ./$(GAME)$(EXEEXT); \
 	    else \
 	        $(MAKE) -C games/$(GAME) run; \
 	    fi; \
@@ -212,19 +227,41 @@ run:
 	        elif [ "$(TARGET)" = "fpga" ]; then cd arch/risc1 && bash run.sh; \
 	        else cd arch/risc1 && bash simulate.sh; fi; \
 	    else \
-	        $(MAKE) -C games/$(GAME)/src/platform/$(ARCH) run-$(TARGET) SIM_GAME=$(GAME) SIM_ARCH=$(ARCH); \
+	        $(MAKE) -C $(call gameplatdir,$(GAME),$(ARCH)) run-$(TARGET) SIM_GAME=$(GAME) SIM_ARCH=$(ARCH); \
 	    fi; \
 	else \
 	    echo "Error: specify TARGET=sdl2|verilator|fpga|gtkwave"; exit 1; \
 	fi
 
+# ── Util test tools ────────────────────────────────────────────────────────
+# Diagnostic tools live under util/<tool>/. RISC2 only.
+#   make list-tools                           — show available tools
+#   make build-tool TOOL=psram_test           — build ROM
+#   make run-tool   TOOL=sound-test TARGET=verilator
+list-tools:
+	@echo "Available util tools (RISC2):"
+	@for t in $(UTIL_TOOLS); do echo "  $$t"; done
+
+build-tool: gcasm
+	@test -n "$(TOOL)" || { echo "Usage: make build-tool TOOL=<name>"; exit 1; }
+	@test -f util/$(TOOL)/Makefile || { echo "Error: util/$(TOOL)/Makefile not found"; exit 1; }
+	@$(MAKE) -C util/$(TOOL)
+
+run-tool: build-tool
+	@test -n "$(TARGET)" || { echo "Usage: make run-tool TOOL=<name> TARGET=verilator|fpga|gtkwave"; exit 1; }
+	@$(MAKE) -C util/$(TOOL) run-$(TARGET) HW=$(HW)
+
 # ── Clean everything ───────────────────────────────────────────────────────
 clean:
 	@echo "Cleaning games..."
-	@for d in $$(find games -name Makefile -path '*/platform/*/Makefile' -exec dirname {} \;); do \
+	@for d in $$(find games \( -path '*/platform/*/Makefile' -o -path '*/platforms/*/Makefile' \) -exec dirname {} \;); do \
 	    $(MAKE) -C "$$d" clean 2>/dev/null || true; \
 	done
 	@$(MAKE) -C games/char-snake clean 2>/dev/null || true
+	@echo "Cleaning util tools..."
+	@for t in $(UTIL_TOOLS); do \
+	    [ -f util/$$t/Makefile ] && $(MAKE) -C util/$$t clean 2>/dev/null || true; \
+	done
 	@echo "Cleaning simulators..."
 	@for d in arch/*/sim-desktop; do \
 	    [ -f "$$d/Makefile" ] && $(MAKE) -C "$$d" clean 2>/dev/null || true; \
