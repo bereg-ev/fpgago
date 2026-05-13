@@ -1,0 +1,15 @@
+Vendored from https://github.com/ultraembedded/core_ddr3_controller (v0.5).
+License: Apache-2.0 (see notices in each .v file).
+
+ECP5 PHY uses ECP5 primitives ODDRX1F, IDDRX1F, DELAYG — all supported by
+yosys/nextpnr-ecp5. DLL-off mode, target DDR clock <= 125 MHz.
+
+File map (upstream → local):
+  src_v/ddr3_axi.v              → ddr3_axi.v
+  src_v/ddr3_axi_pmem.v         → ddr3_axi_pmem.v
+  src_v/ddr3_axi_retime.v       → ddr3_axi_retime.v
+  src_v/ddr3_core.v             → ddr3_core.v
+  src_v/ddr3_dfi_seq.v          → ddr3_dfi_seq.v
+  src_v/phy/ecp5/ddr3_dfi_phy.v → ddr3_dfi_phy_ecp5.v   (renamed)
+
+To refresh: re-clone the upstream repo and copy the same six files.

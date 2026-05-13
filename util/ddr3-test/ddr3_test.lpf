@@ -1,0 +1,140 @@
+## ----------------------------------------------------------------------------
+## ddr3_test.lpf — pin constraints for the DDR3 bring-up board.
+##
+## This is a stripped-down subset of project-risc2-video-hw2.lpf:
+##   - no LCD, I2S, PSRAM, or SDR-SDRAM pins
+##   - no buttons / joystick (test app talks UART)
+##   - DDR3 differential pairs declare only the P-side; nextpnr infers the
+##     N-side automatically through SSTL15D_I IO_TYPE on a true-diff site
+##   - DDR3_RESET_N is unrouted in the v2 schematic — add a SITE assignment
+##     here once a free pin is wired
+## ----------------------------------------------------------------------------
+
+LOCATE COMP "led1" SITE "A2";
+IOBUF PORT "led1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "led2" SITE "A3";
+IOBUF PORT "led2" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "tx" SITE "R4";
+IOBUF PORT "tx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "rx" SITE "T4";
+IOBUF PORT "rx" IO_TYPE=LVCMOS33;
+
+## ----------------------------------------------------------------------------
+## DDR3 SDRAM — Winbond W631GG6MB-12 (1 Gb x16) on banks 2 / 3 (1.5 V VCCIO)
+##
+## Address / control on banks 2/3.  DQ split: lower byte (DQ0..7) in DQS group
+## RDQ44 (bank 3); upper byte (DQ8..15) in DQS group RDQ20 (bank 2).
+## Differential pairs use SSTL15D_I; the N-side site is inferred from the
+## true-diff pad assignment (omit the explicit LOCATE on the N pin).
+## ----------------------------------------------------------------------------
+
+# Address (A0..A12)
+LOCATE COMP "ddr3_a[0]"  SITE "F15";
+LOCATE COMP "ddr3_a[1]"  SITE "M15";
+LOCATE COMP "ddr3_a[2]"  SITE "E15";
+LOCATE COMP "ddr3_a[3]"  SITE "D16";
+LOCATE COMP "ddr3_a[4]"  SITE "R16";
+LOCATE COMP "ddr3_a[5]"  SITE "D14";
+LOCATE COMP "ddr3_a[6]"  SITE "P16";
+LOCATE COMP "ddr3_a[7]"  SITE "E16";
+LOCATE COMP "ddr3_a[8]"  SITE "P15";
+LOCATE COMP "ddr3_a[9]"  SITE "F16";
+LOCATE COMP "ddr3_a[10]" SITE "F12";
+LOCATE COMP "ddr3_a[11]" SITE "N16";
+LOCATE COMP "ddr3_a[12]" SITE "G12";
+IOBUF PORT "ddr3_a[0]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[1]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[2]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[3]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[4]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[5]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[6]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[7]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[8]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[9]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[10]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[11]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_a[12]" IO_TYPE=SSTL15_I;
+
+# Bank address (BA0..BA2)
+LOCATE COMP "ddr3_ba[0]" SITE "C15";
+LOCATE COMP "ddr3_ba[1]" SITE "M16";
+LOCATE COMP "ddr3_ba[2]" SITE "J16";
+IOBUF PORT "ddr3_ba[0]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_ba[1]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_ba[2]" IO_TYPE=SSTL15_I;
+
+# Command / control
+LOCATE COMP "ddr3_ras_n" SITE "B15";
+LOCATE COMP "ddr3_cas_n" SITE "C14";
+LOCATE COMP "ddr3_we_n"  SITE "J15";
+LOCATE COMP "ddr3_cs_n"  SITE "C16";
+LOCATE COMP "ddr3_cke"   SITE "F13";
+LOCATE COMP "ddr3_odt"   SITE "B16";
+IOBUF PORT "ddr3_ras_n" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cas_n" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_we_n"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cs_n"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_cke"   IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_odt"   IO_TYPE=SSTL15_I;
+
+# RESET#  — net DDR3_RESET_N → FPGA pad P11 (PR47C, bank 3, 1.5 V VCCIO).
+# Driven by ddr3_dfi_phy.ddr3_reset_n_o through ddr3_test_top.
+LOCATE COMP "ddr3_reset_n" SITE "P11";
+IOBUF PORT "ddr3_reset_n" IO_TYPE=LVCMOS15;
+
+# Differential clock — true diff pair on bank 3 pio A/B
+LOCATE COMP "ddr3_ck_p" SITE "L16";
+IOBUF PORT "ddr3_ck_p" IO_TYPE=SSTL15D_I;
+
+# Lower-byte data (DQS group RDQ44, bank 3)
+LOCATE COMP "ddr3_dq[0]" SITE "M12";
+LOCATE COMP "ddr3_dq[1]" SITE "T15";
+LOCATE COMP "ddr3_dq[2]" SITE "P12";
+LOCATE COMP "ddr3_dq[3]" SITE "T14";
+LOCATE COMP "ddr3_dq[4]" SITE "P14";
+LOCATE COMP "ddr3_dq[5]" SITE "N13";
+LOCATE COMP "ddr3_dq[6]" SITE "P13";
+LOCATE COMP "ddr3_dq[7]" SITE "R13";
+IOBUF PORT "ddr3_dq[0]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[1]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[2]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[3]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[4]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[5]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[6]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[7]" IO_TYPE=SSTL15_I;
+
+LOCATE COMP "ddr3_dqs_p[0]" SITE "R12";
+IOBUF PORT "ddr3_dqs_p[0]" IO_TYPE=SSTL15D_I;
+
+LOCATE COMP "ddr3_dm[0]" SITE "R14";
+IOBUF PORT "ddr3_dm[0]" IO_TYPE=SSTL15_I;
+
+# Upper-byte data (DQS group RDQ20, bank 2)
+LOCATE COMP "ddr3_dq[8]"  SITE "H12";
+LOCATE COMP "ddr3_dq[9]"  SITE "K15";
+LOCATE COMP "ddr3_dq[10]" SITE "H13";
+LOCATE COMP "ddr3_dq[11]" SITE "K16";
+LOCATE COMP "ddr3_dq[12]" SITE "J13";
+LOCATE COMP "ddr3_dq[13]" SITE "J14";
+LOCATE COMP "ddr3_dq[14]" SITE "J12";
+LOCATE COMP "ddr3_dq[15]" SITE "H14";
+IOBUF PORT "ddr3_dq[8]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[9]"  IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[10]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[11]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[12]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[13]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[14]" IO_TYPE=SSTL15_I;
+IOBUF PORT "ddr3_dq[15]" IO_TYPE=SSTL15_I;
+
+LOCATE COMP "ddr3_dqs_p[1]" SITE "G16";
+IOBUF PORT "ddr3_dqs_p[1]" IO_TYPE=SSTL15D_I;
+
+LOCATE COMP "ddr3_dm[1]" SITE "K14";
+IOBUF PORT "ddr3_dm[1]" IO_TYPE=SSTL15_I;
+

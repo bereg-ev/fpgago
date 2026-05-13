@@ -14,6 +14,13 @@ LLVM_SRC="$SCRIPT_DIR/llvm-project"
 LLVM_BUILD="$SCRIPT_DIR/llvm-risc2-build"
 OSS_CAD_DIR="$SCRIPT_DIR/oss-cad-suite"
 
+# Pinned LLVM commit — the RISC2 backend is written against this exact tree.
+# LLVM's internal APIs (MCAsmInfo, etc.) change frequently on main, so we must
+# NOT track the rolling tip. To bump: pick a new upstream commit, fix any
+# backend breakage against it, then update this hash + HOWTO.txt.
+LLVM_COMMIT="546787ec97e292391c27fe55ef4549e7ba022afe"
+LLVM_REPO="https://github.com/llvm/llvm-project.git"
+
 # ── Colors (disabled when piped) ────────────────────────────────────────────
 if [ -t 1 ]; then
     GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'
@@ -203,6 +210,43 @@ install_oss_cad_suite() {
     ok "OSS CAD Suite installed to $OSS_CAD_DIR"
 }
 
+# ── Fetch LLVM source at the pinned commit ─────────────────────────────────
+#
+# The RISC2 backend is tied to a specific LLVM revision because upstream APIs
+# (MCAsmInfo constructor signature, Triple parsing, etc.) change on main and
+# silently break out-of-tree backends. We fetch only the pinned commit's tree
+# (shallow, ~500 MB) rather than `clone --depth 1` of main, which would drift.
+
+fetch_llvm_source() {
+    info "Fetching LLVM source pinned at ${LLVM_COMMIT:0:12}..."
+
+    if [ -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
+        local current=""
+        current=$(git -C "$LLVM_SRC" rev-parse HEAD 2>/dev/null || echo "")
+        if [ "$current" = "$LLVM_COMMIT" ]; then
+            ok "LLVM source already at pinned commit ($LLVM_SRC)"
+            return
+        fi
+        warn "LLVM source at $LLVM_SRC is at $current"
+        warn "Expected pinned commit $LLVM_COMMIT"
+        warn "Delete $LLVM_SRC and re-run, or manually checkout the pinned commit:"
+        echo "  rm -rf '$LLVM_SRC' && ./setup.sh"
+        echo "  # OR"
+        echo "  git -C '$LLVM_SRC' fetch --depth 1 origin '$LLVM_COMMIT' && \\"
+        echo "    git -C '$LLVM_SRC' checkout '$LLVM_COMMIT'"
+        exit 1
+    fi
+
+    # Shallow-fetch just the pinned commit (GitHub allows fetching by SHA).
+    mkdir -p "$LLVM_SRC"
+    git -C "$LLVM_SRC" init -q
+    git -C "$LLVM_SRC" remote add origin "$LLVM_REPO" 2>/dev/null || \
+        git -C "$LLVM_SRC" remote set-url origin "$LLVM_REPO"
+    git -C "$LLVM_SRC" fetch --depth 1 origin "$LLVM_COMMIT"
+    git -C "$LLVM_SRC" checkout --detach FETCH_HEAD
+    ok "LLVM source pinned at $LLVM_COMMIT in $LLVM_SRC"
+}
+
 # ── Install all system dependencies + download LLVM source ─────────────────
 
 do_install() {
@@ -250,13 +294,7 @@ do_install() {
     install_oss_cad_suite
 
     echo ""
-    info "Downloading LLVM source (shallow clone, ~500 MB)..."
-    if [ -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
-        ok "LLVM source already present at $LLVM_SRC"
-    else
-        git clone --depth 1 https://github.com/llvm/llvm-project.git "$LLVM_SRC"
-        ok "LLVM source cloned to $LLVM_SRC"
-    fi
+    fetch_llvm_source
 
     info "Patching LLVM with RISC2 backend..."
     bash "$SCRIPT_DIR/arch/risc2/cpu/llvm-backend/setup-llvm.sh" "$LLVM_SRC"
@@ -281,6 +319,23 @@ do_llvm() {
     if [ ! -f "$LLVM_SRC/llvm/CMakeLists.txt" ]; then
         fail "LLVM source not found at $LLVM_SRC"
         fail "Run ./setup.sh first to download it."
+        exit 1
+    fi
+
+    # Refuse to build if the source isn't at the pinned commit — otherwise
+    # upstream API drift causes hard-to-diagnose compile errors deep in the
+    # 3000-step build.
+    local current=""
+    current=$(git -C "$LLVM_SRC" rev-parse HEAD 2>/dev/null || echo "")
+    if [ "$current" != "$LLVM_COMMIT" ]; then
+        fail "LLVM source at $LLVM_SRC is at: $current"
+        fail "Expected pinned commit:        $LLVM_COMMIT"
+        echo ""
+        echo "The RISC2 backend is written against the pinned commit; building"
+        echo "against a different LLVM revision will fail (MCAsmInfo etc. drift)."
+        echo ""
+        echo "Fix:"
+        echo "  rm -rf '$LLVM_SRC' '$LLVM_BUILD' && ./setup.sh && ./setup.sh llvm"
         exit 1
     fi
 

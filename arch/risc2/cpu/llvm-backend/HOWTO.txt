@@ -1,5 +1,7 @@
 # RISC2 LLVM Backend — Reproduction Guide
-# Tested with LLVM / Clang 22 (llvmorg-19.1.0 branch + later commits)
+# Pinned to upstream commit 546787ec97e292391c27fe55ef4549e7ba022afe.
+# DO NOT use a rolling clone of llvm-project main — MCAsmInfo and other APIs
+# change on tip and will break this backend (see setup.sh::LLVM_COMMIT).
 # Archive: ~/risc2-backend.tar.gz  SHA256: d2376f2cae95e7c3f9bb7eca667f4afa394d7f9ec079cd823895f1639193dad6
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -10,8 +12,11 @@
 tar -xzf risc2-backend.tar.gz -C /path/to/fpga_gameconsole/cpu/risc2/
 #    produces: cpu/risc2/llvm-backend/
 
-# 2. Clone LLVM (shallow clone is fine)
-git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
+# 2. Fetch LLVM at the pinned commit (shallow — only that one tree)
+git init ~/llvm-project
+git -C ~/llvm-project remote add origin https://github.com/llvm/llvm-project.git
+git -C ~/llvm-project fetch --depth 1 origin 546787ec97e292391c27fe55ef4549e7ba022afe
+git -C ~/llvm-project checkout --detach FETCH_HEAD
 
 # 3. Integrate — symlinks the backend + applies tree_modifications.patch
 cd /path/to/fpga_gameconsole/cpu/risc2/llvm-backend

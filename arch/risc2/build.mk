@@ -16,6 +16,7 @@
 
 REPO_ROOT    ?= ../../../../../
 ARCH_DIR     ?= $(REPO_ROOT)arch/risc2
+INSTALL_DIR  ?= $(ARCH_DIR)
 GCASM        ?= $(REPO_ROOT)util/gcasm/gcasm
 ISA_NAME     ?= risc2
 
@@ -70,7 +71,7 @@ rom.bin: $(ALL_ASM)
 ROM_VH = romL.vh romH.vh $(foreach n,2 3 4 5 6 7 8,romL$(n).vh romH$(n).vh)
 
 install: rom.bin
-	cp rom.bin $(ROM_VH) rom.hex $(ARCH_DIR)/
+	cp rom.bin $(ROM_VH) rom.hex $(INSTALL_DIR)/
 
 # ── Architecture run targets ────────────────────────────────────────────────
 run-verilator: install
