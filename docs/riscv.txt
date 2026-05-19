@@ -1,0 +1,58 @@
+in case of DarkRISCV what does 16 cycles mean, what is the connection with the 3-stage pipeline?                                                                        
+
+⏺ Good question. Here's what's happening:
+  
+  16 cycles total = 5 reset cycles + 11 execution cycles
+
+  cyc 0..4   : reset held (rst=0)
+  cyc 5      : rst goes high, CPU exits reset
+  cyc 5..15  : program runs and 9 instructions complete
+  cyc 16     : SoC's uart_tx_pulse register captures the '\n' store
+
+  Why 11 execution cycles for 9 instructions?
+
+  The program has these 9 instructions running before the \n is emitted:
+  lui  t0, 0x8       │ 1
+  addi t1, x0, 'H'   │ 2
+  sb   t1, 0(t0)     │ 3   →  prints 'H'
+  addi t1, x0, 'i'   │ 4   
+  sb   t1, 0(t0)     │ 5   →  prints 'i'
+  addi t1, x0, '!'   │ 6
+  sb   t1, 0(t0)     │ 7   →  prints '!'
+  addi t1, x0, '\n'  │ 8
+  sb   t1, 0(t0)     │ 9   →  prints '\n'
+
+  In a 3-stage pipeline (IF | ID | EX), three different instructions live in the CPU simultaneously, each in a different stage:
+
+  cyc:        5   6   7   8   9   10  11  12  13  14  15
+  ─────────────────────────────────────────────────────
+  IF stage:   I0  I1  I2  I3  I4  I5  I6  I7  I8  -   -
+  ID stage:    .  I0  I1  I2  I3  I4  I5  I6  I7  I8  -
+  EX stage:    .   .  I0  I1  I2  I3  I4  I5  I6  I7  I8
+
+  The first instruction's EX is at cyc 7 (= 2 fill cycles after start). After that, one instruction retires per cycle. The 9th instruction's EX is at cyc 7 + 8 = cyc 15.
+  One more cycle for the SoC's registered uart_tx_pulse to rise = cyc 16. ✓
+
+  Connection to "3-stage":
+
+  - "3 stages" doesn't mean each instruction takes 3 cycles — it means 3 are in flight at once.
+  - Throughput: 1 instruction per cycle in steady state (one retires every cycle).
+  - Cost: pipeline-fill penalty = 2 cycles at startup (and after every taken branch — that's why infinite loops and tight branches hurt deeper pipelines more).
+
+  That's the canonical trade-off: deeper pipelines get higher MHz (each stage does less work, so the clock can run faster), but the fill cost grows. DarkRISCV picks 3
+  stages as a sweet spot where the fill cost is small but each stage's combinational logic is short enough to clock fast on a small FPGA.
+
+  Compare with the other two cores running the same program:
+
+  ┌──────────────────────────┬──────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │           Core           │  Cycles  │                                                       What's going on                                                       │
+  ├──────────────────────────┼──────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ DarkRISCV (3-stage)      │ 11 exec  │ ~1.2 cycles/instr — basically pipelined throughput                                                                          │
+  ├──────────────────────────┼──────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ PicoRV32 (multi-cycle    │ ~57 exec │ Each instruction goes through several microsteps (decode → reg fetch → ALU → optional mem → writeback) before the next      │
+  │ FSM)                     │          │ starts — no overlap                                                                                                         │
+  ├──────────────────────────┼──────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ SERV (bit-serial)        │ ~427     │ Each instruction's data path is 1 bit wide, so a 32-bit op needs 32 shift cycles per stage                                  │
+  │                          │ exec     │                                                                                                                             │
+  └──────────────────────────┴──────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+

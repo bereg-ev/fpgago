@@ -51,8 +51,23 @@ typedef uint8_t  u8;
 #define CUST_COUNT  48                 /* covers codes 128..175 */
 
 /* ---- HAL interface ------------------------------------------------------ */
+void hal_init(void);
+int  hal_getchar(void);
 void hal_clear(void);
 void hal_putchar(int col, int row, int ch);
 void hal_swap(void);
+
+/* Overwrite one font-ROM slot with a custom 8x16 glyph.
+ *   slot   : 0..127 (the HAL masks 0x7F internally, so the symbolic 128+
+ *            CH_* codes the game uses pass straight through)
+ *   bitmap : 16 bytes, top-to-bottom; each byte = 8 horizontal pixels, MSB
+ *            is the leftmost pixel.
+ * Implemented per arch (FPGA: writes font ROM; SDL2: per-process table). */
+void hal_upload_glyph(int slot, const unsigned char *bitmap);
+
+/* Window title used by the SDL2 sim — ignored on FPGA. */
+#ifndef GAME_TITLE
+#define GAME_TITLE "Char-Gomoku"
+#endif
 
 #endif /* HAL_H */

@@ -464,11 +464,65 @@ int main(int argc, char** argv)
     /* ═══════════════════════════════════════════════
      * Main simulation loop — one iteration = one full clock cycle
      * ═══════════════════════════════════════════════ */
+    uint64_t dbg_cyc = 0;
     while (running && !ctx->gotFinish())
     {
         /* ── Rising edge ── */
         top->clk = 1;
         top->eval();
+        dbg_cyc++;
+
+        // Trace ALL stores (with PC for p3 debugging when SIM_TRACE_PC=1)
+        // Also trace r14 (SP) register changes when SIM_TRACE_R14=1.
+        static int dbg_wr_cnt = 0;
+        static int dbg_trace_pc = -1;
+        static int dbg_trace_r14 = -1;
+        static unsigned prev_r14 = 0;
+        static int dbg_r14_cnt = 0;
+        if (dbg_trace_pc == -1) {
+            const char* e = getenv("SIM_TRACE_PC");
+            dbg_trace_pc = e ? atoi(e) : 0;
+        }
+        if (dbg_trace_r14 == -1) {
+            const char* e = getenv("SIM_TRACE_R14");
+            dbg_trace_r14 = e ? atoi(e) : 0;
+        }
+#if defined(USE_RISC2P3) || defined(USE_RISC2P5)
+        if (dbg_trace_r14 && dbg_r14_cnt < 100000) {
+            unsigned cur_r14 = (unsigned)top->rootp->soc__DOT__cpu0__DOT__cpu_registers[14];
+            if (cur_r14 != prev_r14) {
+                /* exmem_pc_plus4 is the PC+4 of the instr that committed in
+                 * this cycle's MEM/WB stage — i.e., the writer of r14. */
+                unsigned wb_pc = (unsigned)top->rootp->soc__DOT__cpu0__DOT__exmem_pc_plus4 - 4;
+                fprintf(stderr, "[R14 c%7llu wb_pc=%06x] r14: %06x -> %06x\n",
+                    (unsigned long long)dbg_cyc, wb_pc, prev_r14, cur_r14);
+                prev_r14 = cur_r14;
+                dbg_r14_cnt++;
+            }
+        }
+#endif
+        {
+            auto* r = top->rootp;
+            if (r->soc__DOT__data_wr && dbg_wr_cnt < 100000) {
+                if (dbg_trace_pc)
+                    fprintf(stderr, "[WR c%7llu pc=%06x] addr=%06x val=%08x\n",
+                        (unsigned long long)dbg_cyc,
+#if defined(USE_RISC2P3) || defined(USE_RISC2P5)
+                        /* PC+4 of the EXMEM-staged instr that issued this STORE */
+                        (unsigned)(r->soc__DOT__cpu0__DOT__exmem_pc_plus4 - 4),
+#else
+                        0u,
+#endif
+                        (unsigned)r->soc__DOT__data_addr,
+                        (unsigned)r->soc__DOT__data_out_value);
+                else
+                    fprintf(stderr, "[WR c%7llu] addr=%06x val=%08x\n",
+                        (unsigned long long)dbg_cyc,
+                        (unsigned)r->soc__DOT__data_addr,
+                        (unsigned)r->soc__DOT__data_out_value);
+                dbg_wr_cnt++;
+            }
+        }
 
         /* Release reset after RESET_CYCLES rising edges */
         if (rst_count < RESET_CYCLES)
@@ -527,14 +581,31 @@ int main(int argc, char** argv)
             frame_count++;
 
             /* Headless trace: print CPU PC / stage / instruction register so
-             * we can tell whether the CPU is making forward progress. */
+             * we can tell whether the CPU is making forward progress.
+             *
+             * cpu_risc2p2/p3/p5 don't have the 'stage' or 'instr_reg' fields
+             * (they use a different microarchitecture); skip those fields for
+             * pipelined variants so the trace still compiles. */
             if (headless && trace_period > 0 && (frame_count % trace_period) == 0)
             {
                 auto* r = top->rootp;
+#if defined(USE_RISC2P2) || defined(USE_RISC2P3) || defined(USE_RISC2P5)
+                /* Pipelined CPU: no FSM stage; PC is held in cpu0.pc */
+                uint32_t pc = r->soc__DOT__cpu0__DOT__pc;
+  #ifdef HW_V2
+                uint32_t xfers = r->soc__DOT__psram_iface0__DOT__psram0__DOT__xfer_count;
+                bool qmode     = r->soc__DOT__psram_chip0__DOT__qpi_mode;
+                fprintf(stderr, "frame %d pc=0x%06x | xfers=%u qpi=%d\n",
+                    frame_count, pc & 0xFFFFFF, xfers, qmode);
+  #else
+                fprintf(stderr, "frame %d pc=0x%06x\n", frame_count, pc & 0xFFFFFF);
+  #endif
+#else
+                /* Original cpu_risc2: FSM-based, exposes instr_addr/stage/instr_reg */
                 uint32_t pc    = r->soc__DOT__instr_addr;
                 uint32_t stage = r->soc__DOT__cpu0__DOT__stage;
                 uint32_t ireg  = r->soc__DOT__cpu0__DOT__instr_reg;
-#ifdef HW_V2
+  #ifdef HW_V2
                 uint32_t xfers = r->soc__DOT__psram_iface0__DOT__psram0__DOT__xfer_count;
                 uint32_t pi_st = r->soc__DOT__psram_iface0__DOT__state;
                 uint32_t ps_st = r->soc__DOT__psram_iface0__DOT__psram0__DOT__state;
@@ -548,11 +619,29 @@ int main(int argc, char** argv)
                     "frame %d pc=0x%06x stg=%u ireg=0x%08x r1=%x r3=%x r4=%x r5=%x r6=%x | xfers=%u iface=%u ctrl=%u qpi=%d\n",
                     frame_count, pc & 0xFFFFFF, stage, ireg, r1v, r3v, r4v, r5v, r6v,
                     xfers, pi_st, ps_st, qmode);
-#else
+  #else
                 fprintf(stderr,
                     "frame %d pc=0x%06x stg=%u ireg=0x%08x\n",
                     frame_count, pc & 0xFFFFFF, stage, ireg);
+  #endif
 #endif
+            }
+
+            /* Periodic dump in interactive mode (for debugging timing issues
+             * — visible if SIM_PERIODIC_DUMP=N env is set; writes a PPM at
+             * each multiple of N frames to /tmp/sim_frame_<N>.ppm). */
+            {
+                static int pdump = -2;
+                if (pdump == -2) {
+                    const char* e = getenv("SIM_PERIODIC_DUMP");
+                    pdump = e ? atoi(e) : 0;
+                }
+                if (pdump > 0 && (frame_count % pdump) == 0) {
+                    char path[128];
+                    snprintf(path, sizeof(path),
+                             "/tmp/sim_frame_%d.ppm", frame_count);
+                    write_ppm(path, fb, LCD_W, LCD_H);
+                }
             }
 
             /* Headless exit: save screenshot and quit */

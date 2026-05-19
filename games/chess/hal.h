@@ -30,6 +30,12 @@ typedef uint8_t  u8;
 /* Pack 5-bit R, 6-bit G, 5-bit B into RGB565 */
 #define RGB565(r,g,b)  ((u16)(((r)<<11)|((g)<<5)|(b)))
 
+/* One-shot platform bring-up. */
+void hal_init(void);
+
+/* Blocking input read. */
+int  hal_getchar(void);
+
 /* Fill the entire back buffer with colour c */
 void hal_clear(u16 c);
 
@@ -41,5 +47,10 @@ void hal_fill_rect(int x, int y, int w, int h, u16 c);
 
 /* Present the back buffer (flip/blit to display) */
 void hal_swap(void);
+
+/* Window title used by the SDL2 sim — ignored on FPGA. */
+#ifndef GAME_TITLE
+#define GAME_TITLE "Chess"
+#endif
 
 #endif /* HAL_H */

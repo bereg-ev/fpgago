@@ -159,8 +159,8 @@ typedef struct {
     int flag;
 } tt_entry_t;
 
-#ifdef RISC2_PLATFORM
-/* TT disabled on RISC2 — too large for on-chip RAM */
+#if defined(RISC2_PLATFORM) || defined(PLATFORM_RISCV_DARKRV)
+/* TT disabled on bare-metal embedded targets — too large for on-chip RAM. */
 #define TT_BITS  0
 #define TT_SIZE  1
 #define TT_MASK  0

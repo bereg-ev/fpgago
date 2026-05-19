@@ -1,0 +1,85 @@
+## ----------------------------------------------------------------------------
+## project-riscv-darkrv-video-hw2.lpf
+##
+## Pin constraints for the riscv-darkrv FPGA target, HW=v2.
+## Subset of arch/risc2/project-risc2-video-hw2.lpf — only the pins this
+## design actually uses (LCD, UART, LEDs, I2S stubs, PSRAM).  No SDRAM or
+## DDR3 here — RAM=psram is the only external-memory backing wired up.
+## ----------------------------------------------------------------------------
+
+LOCATE COMP "i2s_data" SITE "B1";
+IOBUF PORT "i2s_data" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_mclk" SITE "D1";
+IOBUF PORT "i2s_mclk" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_lrck" SITE "C1";
+IOBUF PORT "i2s_lrck" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_bclk" SITE "C2";
+IOBUF PORT "i2s_bclk" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_en" SITE "E2";
+IOBUF PORT "i2s_en" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "led1" SITE "A2";
+IOBUF PORT "led1" IO_TYPE=LVCMOS33;
+LOCATE COMP "led2" SITE "A3";
+IOBUF PORT "led2" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "tx" SITE "R4";
+IOBUF PORT "tx" IO_TYPE=LVCMOS33;
+LOCATE COMP "rx" SITE "T4";
+IOBUF PORT "rx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "lcd_clk" SITE "J3";
+IOBUF PORT "lcd_clk" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_pwm" SITE "N4";
+IOBUF PORT "lcd_pwm" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_hsync" SITE "L5";
+IOBUF PORT "lcd_hsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_vsync" SITE "P1";
+IOBUF PORT "lcd_vsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_de" SITE "P3";
+IOBUF PORT "lcd_de" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[15]" SITE "E1";
+IOBUF PORT "lcd_data[15]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[14]" SITE "F2";
+IOBUF PORT "lcd_data[14]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[13]" SITE "F1";
+IOBUF PORT "lcd_data[13]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[12]" SITE "G2";
+IOBUF PORT "lcd_data[12]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[11]" SITE "G1";
+IOBUF PORT "lcd_data[11]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[10]" SITE "H2";
+IOBUF PORT "lcd_data[10]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[9]" SITE "J2";
+IOBUF PORT "lcd_data[9]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[8]" SITE "J1";
+IOBUF PORT "lcd_data[8]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[7]" SITE "K2";
+IOBUF PORT "lcd_data[7]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[6]" SITE "K1";
+IOBUF PORT "lcd_data[6]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[5]" SITE "L2";
+IOBUF PORT "lcd_data[5]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[4]" SITE "L1";
+IOBUF PORT "lcd_data[4]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[3]" SITE "M2";
+IOBUF PORT "lcd_data[3]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[2]" SITE "M1";
+IOBUF PORT "lcd_data[2]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[1]" SITE "N1";
+IOBUF PORT "lcd_data[1]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[0]" SITE "P2";
+IOBUF PORT "lcd_data[0]" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "psram_ce_n" SITE "B4";
+IOBUF PORT "psram_ce_n" IO_TYPE=LVCMOS33;
+LOCATE COMP "psram_sclk" SITE "B6";
+IOBUF PORT "psram_sclk" IO_TYPE=LVCMOS33;
+LOCATE COMP "psram_sio0" SITE "A6";
+IOBUF PORT "psram_sio0" IO_TYPE=LVCMOS33;
+LOCATE COMP "psram_sio1" SITE "B5";
+IOBUF PORT "psram_sio1" IO_TYPE=LVCMOS33;
+LOCATE COMP "psram_sio2" SITE "A5";
+IOBUF PORT "psram_sio2" IO_TYPE=LVCMOS33;
+LOCATE COMP "psram_sio3" SITE "A4";
+IOBUF PORT "psram_sio3" IO_TYPE=LVCMOS33;

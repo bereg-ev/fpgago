@@ -17,9 +17,9 @@
 
 #define ANGLE_COUNT  2048   /* steps per full rotation */
 
-/* On RISC2 the tables are pre-computed and live in ROM (.rodata).
- * On SDL2 they are filled at startup by trig_init(), which uses <math.h>. */
-#ifdef PLATFORM_RISC2
+/* Bare-metal targets (RISC2, riscv-darkrv) keep the tables in ROM (.rodata).
+ * SDL2 fills them at startup via trig_init() (which uses <math.h>). */
+#if defined(PLATFORM_RISC2) || defined(PLATFORM_RISCV_DARKRV)
 extern const fixed_t sin_table[ANGLE_COUNT];
 extern const fixed_t cos_table[ANGLE_COUNT];
 #else

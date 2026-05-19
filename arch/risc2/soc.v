@@ -361,12 +361,36 @@ module soc(
             else if (icache_data_valid) xdata_pending <= 0;
         end
 
+    /* CPU variant selection — pick one of:
+     *   (default)         cpu_risc2     — original 4-5 cycle FSM
+     *   `define USE_RISC2P2  cpu_risc2p2 — 2-stage pipeline (IF | EX-MEM-WB)
+     *   `define USE_RISC2P3  cpu_risc2p3 — 3-stage pipeline (IF | ID/EX | MEM/WB)
+     *   `define USE_RISC2P5  cpu_risc2p5 — 5-stage pipeline (IF | ID | EX | MEM | WB)
+     * All variants share the cpu_risc2 port interface and ISA. */
+`ifdef USE_RISC2P5
+    cpu_risc2p5 cpu0(
+`elsif USE_RISC2P3
+    cpu_risc2p3 cpu0(
+`elsif USE_RISC2P2
+    cpu_risc2p2 cpu0(
+`else
     cpu_risc2 cpu0(
+`endif
         .clk(clk),
 
 `ifdef CPU_DEBUGGER
         .clk_en(cpu_clk_en && !icache_data_wr_busy),
         .rst(cpu_rst),
+`elsif USE_RISC2P5
+        /* Pipelined CPUs use direct BRAM fetch (bypass icache); no busy gating. */
+        .clk_en(1'b1),
+        .rst(rst),
+`elsif USE_RISC2P3
+        .clk_en(1'b1),
+        .rst(rst),
+`elsif USE_RISC2P2
+        .clk_en(1'b1),
+        .rst(rst),
 `else
         .clk_en(!icache_data_wr_busy),
         .rst(rst),
@@ -375,7 +399,15 @@ module soc(
 //        .clk_en(1'b1),
 //        .clk_en(rxen != rxen0 && rxdata == 8'h53),
 
+`ifdef USE_RISC2P5
+        .instr_addr(instr_addr), .instr_value(instr_data), .instr_valid(1'b1),
+`elsif USE_RISC2P3
+        .instr_addr(instr_addr), .instr_value(instr_data), .instr_valid(1'b1),
+`elsif USE_RISC2P2
+        .instr_addr(instr_addr), .instr_value(instr_data), .instr_valid(1'b1),
+`else
         .instr_addr(instr_addr), .instr_value(icache_instr), .instr_valid(icache_valid),
+`endif
         .data_addr(data_addr), .data_in_value(data_in_value), .data_in_valid(data_in_valid), .data_rd(data_rd),
         .data_out_value(data_out_value), .data_wr(data_wr), .data_out_strobe(data_out_strobe),
         .data_out_rdy(1'b1),

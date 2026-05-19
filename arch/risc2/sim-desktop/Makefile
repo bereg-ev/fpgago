@@ -14,7 +14,7 @@
 #
 
 REPO = ../../..
-CPU  = ../cpu
+CPUDIR = ../cpu
 UTIL = $(REPO)/util
 PERI = $(REPO)/peripheral
 PROJ = ..
@@ -29,8 +29,29 @@ else
   HW_VSRCS  =
 endif
 
+# ── CPU variant (CPU=risc2 default | risc2p2 | risc2p3 | risc2p5) ────────────
+# Default is the FSM core (risc2).  The pipelined variants share the ISA
+# but cpu_risc2p5.v has a hazard that mis-executes labyrinth2's raycaster
+# (see games/labyrinth2/PERF_JOURNEY.md) — opt in explicitly when testing.
+CPU ?= risc2
+ifeq ($(CPU),risc2p2)
+  CPU_DEFINE = -DUSE_RISC2P2
+  CPU_VSRCS  = $(CPUDIR)/cpu_risc2p2.v
+else ifeq ($(CPU),risc2p3)
+  CPU_DEFINE = -DUSE_RISC2P3
+  CPU_VSRCS  = $(CPUDIR)/cpu_risc2p3.v
+else ifeq ($(CPU),risc2p5)
+  CPU_DEFINE = -DUSE_RISC2P5
+  CPU_VSRCS  = $(CPUDIR)/cpu_risc2p5.v
+else
+  CPU_DEFINE =
+  CPU_VSRCS  =
+endif
+
 # ── Verilator flags ─────────────────────────────────────────────────────────
+CPU_VDEFINE ?=
 VFLAGS = \
+    $(CPU_VDEFINE) \
     --cc \
     --exe \
     --build \
@@ -38,7 +59,8 @@ VFLAGS = \
     -DSIMULATION \
     -DSIMULATION_SDL \
     $(HW_DEFINE) \
-    -I$(CPU) \
+    $(CPU_DEFINE) \
+    -I$(CPUDIR) \
     -I$(PROJ) \
     --Mdir obj_dir \
     --no-timing \
@@ -54,7 +76,7 @@ VFLAGS = \
     -Wno-INITIALDLY \
     -Wno-UNSIGNED \
     -Wno-IMPLICIT \
-    -CFLAGS  "$(shell sdl2-config --cflags) $(HW_DEFINE) -DSIM_TITLE='\"$(or $(SIM_GAME),FPGAgo) — $(or $(SIM_ARCH),risc2) (ESC=quit)\"'" \
+    -CFLAGS  "$(shell sdl2-config --cflags) $(HW_DEFINE) $(CPU_DEFINE) -DSIM_TITLE='\"$(or $(SIM_GAME),FPGAgo) — $(or $(SIM_ARCH),risc2) (ESC=quit)\"'" \
     -LDFLAGS "$(shell sdl2-config --libs)"
 
 # ── Verilog source list ──────────────────────────────────────────────────────
@@ -65,8 +87,9 @@ VFLAGS = \
 VSRCS = \
     $(PROJ)/soc.v \
     $(PROJ)/interface-sdram.v \
-    $(CPU)/cpu_risc2.v \
-    $(CPU)/alu_risc2.v \
+    $(CPUDIR)/cpu_risc2.v \
+    $(CPU_VSRCS) \
+    $(CPUDIR)/alu_risc2.v \
     $(UTIL)/ecp5_simul.v \
     $(PERI)/uart.v \
     $(PERI)/bootloader.v \

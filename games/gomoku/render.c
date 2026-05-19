@@ -13,7 +13,7 @@
  */
 
 #include "render.h"
-#include "font.h"
+#include "font5x7.h"
 #include "hal.h"
 
 /* ── Layout constants ─────────────────────────────────────────────────────── */
