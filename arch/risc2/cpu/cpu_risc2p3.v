@@ -543,6 +543,28 @@ module cpu_risc2p3 (
           squash_count <= 1'b0;
           ifid_valid   <= 1'b0;
           pc           <= pc + 24'd4;     // keep fetch flowing past in-flight squash
+        end else if (ifid_valid && id_op_is_store &&
+                     (instr_value[31:27] == `INSTR_LOAD ||
+                      instr_value[31:27] == `INSTR_STORE)) begin
+          // PREDICTED store_memop_conflict for next cycle.  Current IFID is
+          // a STORE entering EX, AND BRAM dout (the instr we'd latch into
+          // IFID for next cycle) is also LOAD/STORE.  At the next cycle
+          // EX=store, IFID=load/store → store_memop_conflict fires, stalling
+          // ID/EX.  But the stall would have held pc at the advanced value,
+          // meaning BRAM samples the next-next addr at the stall edge and
+          // the post-store instr (currently in BRAM dout) is silently lost.
+          //
+          // Fix: latch IFID as usual BUT do NOT advance pc.  BRAM keeps
+          // sampling the same addr during the stall, so the post-store
+          // instr stays in BRAM dout.  After the stall, IF normally latches
+          // the post-store instr.  Set squash_count=1 so the cycle right
+          // after the stall ends (when IF would otherwise re-latch the same
+          // stale BRAM output) takes the squash branch instead.
+          ifid_instr   <= instr_value;
+          ifid_pc      <= pc_in_flight;
+          ifid_valid   <= 1'b1;
+          squash_count <= 1'b1;
+          // pc HOLDS — do not advance.
         end else begin
           // Normal IF: latch instr_value (= mem[pc_in_flight]) and advance pc
           ifid_instr <= instr_value;

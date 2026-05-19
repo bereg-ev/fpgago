@@ -629,19 +629,18 @@ module cpu_risc2p5 (
           ifid_valid   <= 1'b0;
           pc           <= pc + 24'd4;
         end else if (ifid_valid && id_op_is_load) begin
-          // LOAD moves to IDEX this cycle.  Next cycle load_use_hazard may
-          // stall the pipeline if the LOAD's consumer is the post-LOAD instr.
-          // If we advance pc normally here, BRAM advances past the instr
-          // AFTER the consumer (which we'll need when the stall ends).
-          // Latch IFID normally (= consumer instr) but HOLD pc so BRAM keeps
-          // presenting mem[pc] until stall ends.
+          // LOAD-hold (ORIGINAL): latch IFID normally but HOLD pc so BRAM
+          // keeps presenting the same instr through the upcoming pipeline
+          // stall.
           //
-          // NOTE: cpu_risc2p3.v has a proven rollback-based fix for an
-          // analogous LOAD-IFID hazard.  The naive port to p5 (rollback
-          // pc<=ifid_pc+4) produces a black screen because p5's 5-stage
-          // pipeline has additional ID/EX/MEM latency that interacts with
-          // the rollback differently than p3's 3-stage layout.  TODO: design
-          // a p5-specific rollback that accounts for the extra stages.
+          // KNOWN LIMITATION: this approach has hazards that corrupt
+          // chained LOADs and ALU sequences depending on it.  cpu_risc2p3.v
+          // has a working fix using pc-rollback + predicted-store-conflict,
+          // but p5's 5-stage pipeline (vs p3's 3-stage) places EX/MEM
+          // further from IF, so the p3 fix doesn't directly port.  Trying
+          // the predicted-store-conflict alone on p5 didn't help (broke
+          // gomoku, partially improved labyrinth2 but still corrupted).
+          // CPU=risc2p3 is the working pipelined alternative for now.
           ifid_instr <= instr_value;
           ifid_pc    <= pc_in_flight;
           ifid_valid <= 1'b1;
