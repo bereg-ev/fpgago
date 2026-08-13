@@ -1,0 +1,5 @@
+# fpgago desktop companion app — pinned deps (provisioned into desktop/.venv
+# by `make desktop`).
+PySide6>=6.6,<6.9
+pyserial>=3.5,<4
+requests>=2.31

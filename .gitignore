@@ -1,55 +1,116 @@
-# Prerequisites
-*.d
+# ── Build output ────────────────────────────────────────────────────────────
 
-# Object files
+# Verilator --Mdir output (obj_dir, obj_dir_shot, obj_via, obj_drive, ...)
+obj_dir/
+obj_*/
 *.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
 *.a
-*.la
-*.lo
+*.d
+*.gch
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+# iverilog / gtkwave
+*.vvp
+*.vcd
+*.fst
+retro-arch/common/cpu/6502/build/
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+# setup.sh generated files
+.config.mk
+oss-cad-suite/
 
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
+# yosys / nextpnr / ecppack output from run.sh
+out.lpf
+out.pnr.log
+out_synth.v
+out_sv2v.v
+retro-arch/*/out.bit
+retro-arch/*/out.config
+retro-arch/*/out.json
+retro-arch/*/out.timing
+retro-arch/*/out.version
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# screen grabs
+*.ppm
 
-# debug information files
-*.dwo
+# ── Bitstreams ──────────────────────────────────────────────────────────────
+# bitstreams/ is the ONE place .bit files are tracked on purpose: what a fresh
+# clone can flash without installing a toolchain (see bitstreams/README.md).
+# They are legal to ship because the ROM arrays are EMPTY — the board loads
+# the user's own dumps at run time.  The copyright fence at the bottom of this
+# file bans every ROM-BAKED bit; that is the test to apply before adding one.
+*.bit
+!bitstreams/*.bit
+
+# ── Generated, not source ───────────────────────────────────────────────────
+# The BIOS font is baked from retro-arch/common/bios_font.py on demand.
+retro-arch/*/roms/bios_font_*.hex
+# prg2hex.py / run.sh GAME= output: a game baked into the RAM init image.
+retro-arch/*/roms/game.hex
+retro-arch/*/roms/game.uart
+retro-arch/*/roms/autorun.hex
+# The c64 EasyFlash self-test cart, built by mk_ef_testcart.py.
+retro-arch/c64/roms/ef_test.flat
+
+# SID wave/filter table ROMs are SOURCE (generated once by
+# c64/sid/mk_sid_tables.py from the upstream MiSTer sid_tables.sv and checked
+# in) — exempt them from the ROM rules below, or a fresh clone cannot build
+# the c64 SID.
+!retro-arch/c64/roms/sid_*.hex
+
+# ── Desktop companion app ───────────────────────────────────────────────────
+desktop/.venv/
+desktop/**/__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+# Catalog DB + downloaded/imported game dumps (the in-repo default location,
+# see desktop/library/config.py).  Large and copyrighted — never commit.
+# `make clean` does NOT touch this path.
+/game-library/
+desktop/library/data/compat-local.jsonl
+
+# ── Local tooling and editor state ──────────────────────────────────────────
+# Assistant / editor working files: local scratch, never part of the project.
+.claude/
+CLAUDE.md
+AGENTS.md
+.cursor/
+.cursorrules
+.cursorignore
+.aider*
+.continue/
+.windsurfrules
+.github/copilot-instructions.md
+.vscode/
+.idea/
+# Dated terminal-session dumps ("2026-07-11-142513-local-command-…").
+20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*-local-command-*.txt
+
+# ── OS / editor noise ───────────────────────────────────────────────────────
+.DS_Store
+*.swp
+*~
+
+# ── Copyright fence ─────────────────────────────────────────────────────────
+# Commodore ROM images, ROM-baked bitstreams and commercial game dumps are
+# copyrighted and must NEVER be committed.  They live only on the local disk:
+# `make download-rom ARCH=<m>` (or the desktop Install tab) fetches the ROMs
+# from the VICE project after an explicit consent prompt; games arrive through
+# the game library.
+retro-arch/*/roms/*.bin
+retro-arch/*/roms/kernal*.hex
+retro-arch/*/roms/basic*.hex
+retro-arch/*/roms/chargen*.hex
+retro-arch/*/roms/3plus1*.hex
+retro-arch/*/roms/games/
+# The ".roms" container built for a ROM-free bitstream is the user's own
+# copyrighted ROM bytes in a new wrapper, so it follows the same rule.
+*.roms
+*.d64
+*.g64
+*.d81
+*.prg
+*.t64
+*.tap
+*.crt
+*.flat

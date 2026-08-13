@@ -1,0 +1,138 @@
+## project-c64-hw2.lpf
+##
+## Hardware version 2 (kicad-git/fpga-gameconsole-2) — same ball map as
+## project-c16-hw2.lpf.  MCU<->FPGA UART on A11/A12 (nets FPGA_TX/FPGA_RX):
+##   MCU TX (RP2350 GPIO12) -> A11 = FPGA rx
+##   FPGA tx = A12          -> MCU RX (GPIO13)
+
+## PAL master clock: 17.734475 MHz crystal oscillator (X1/U3 on the MCU
+## sheet, net PAL-17.734475) — 4x the PAL colour subcarrier, the real C64
+## master frequency.  The top's EHXPLLL multiplies it by 16/9 to the true
+## dot4x 31.527955 MHz.  nextpnr derives the PLL output constraint from
+## this FREQUENCY PORT automatically.
+LOCATE COMP "clk_pal" SITE "B11";
+IOBUF PORT "clk_pal" IO_TYPE=LVCMOS33;
+FREQUENCY PORT "clk_pal" 17.734475 MHZ;
+
+## v2 LEDs: FPGA-LED1 = B2, FPGA-LED2 = A2 (A3 is BTN-RIGHT on this board).
+LOCATE COMP "led1" SITE "B2";
+IOBUF PORT "led1" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "led2" SITE "A2";
+IOBUF PORT "led2" IO_TYPE=LVCMOS33;
+
+## 8 push buttons (active low, internal pull-ups), same balls as the
+## v2 board: BTN-A=R2 BTN-B=T2 BTN-C=R3 BTN-D=R1
+##               BTN-UP=B3 BTN-DOWN=C5 BTN-LEFT=C4 BTN-RIGHT=A3
+LOCATE COMP "btn_a" SITE "R2";
+IOBUF PORT "btn_a" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_b" SITE "T2";
+IOBUF PORT "btn_b" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_c" SITE "R3";
+IOBUF PORT "btn_c" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_d" SITE "R1";
+IOBUF PORT "btn_d" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_up" SITE "B3";
+IOBUF PORT "btn_up" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_down" SITE "C5";
+IOBUF PORT "btn_down" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_left" SITE "C4";
+IOBUF PORT "btn_left" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "btn_right" SITE "A3";
+IOBUF PORT "btn_right" IO_TYPE=LVCMOS33 PULLMODE=UP;
+
+## I2S audio (MS4344 DAC + NS4150/PAM8302 amp) — same balls as the
+## v2 board (verified against the audio schematic).
+LOCATE COMP "i2s_data" SITE "B1";
+IOBUF PORT "i2s_data" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_mclk" SITE "D1";
+IOBUF PORT "i2s_mclk" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_lrck" SITE "C1";
+IOBUF PORT "i2s_lrck" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_bclk" SITE "C2";
+IOBUF PORT "i2s_bclk" IO_TYPE=LVCMOS33;
+LOCATE COMP "i2s_en" SITE "E2";
+IOBUF PORT "i2s_en" IO_TYPE=LVCMOS33;
+
+## MCU⇄FPGA QSPI link (nets FPGA-QSPI-*, verified against the
+## fpga-gameconsole-2 PCB netlist 2026-07-10). RP2350 is SPI master:
+##   GPIO6=SD0(MOSI)→A7  GPIO7=SD1(MISO)→B7  GPIO8=SD2(REQ)→A8
+##   GPIO9=SD3(spare)→A9  GPIO10=SCK→A10  GPIO11=SS→B10
+## All lines have 10k pull-ups on the MCU side; SCK has 33R series.
+LOCATE COMP "qspi_sd0" SITE "A7";
+IOBUF PORT "qspi_sd0" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "qspi_sd1" SITE "B7";
+IOBUF PORT "qspi_sd1" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "qspi_sd2" SITE "A8";
+IOBUF PORT "qspi_sd2" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "qspi_sd3" SITE "A9";
+IOBUF PORT "qspi_sd3" IO_TYPE=LVCMOS33 PULLMODE=UP;
+LOCATE COMP "qspi_sck" SITE "A10";
+IOBUF PORT "qspi_sck" IO_TYPE=LVCMOS33;
+LOCATE COMP "qspi_ss" SITE "B10";
+IOBUF PORT "qspi_ss" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "tx" SITE "A12";
+IOBUF PORT "tx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "rx" SITE "A11";
+IOBUF PORT "rx" IO_TYPE=LVCMOS33;
+
+LOCATE COMP "lcd_clk" SITE "J3";
+IOBUF PORT "lcd_clk" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_pwm" SITE "N4";
+IOBUF PORT "lcd_pwm" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_hsync" SITE "L5";
+IOBUF PORT "lcd_hsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_vsync" SITE "P1";
+IOBUF PORT "lcd_vsync" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_de" SITE "P3";
+IOBUF PORT "lcd_de" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[15]" SITE "G1";
+IOBUF PORT "lcd_data[15]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[14]" SITE "G2";
+IOBUF PORT "lcd_data[14]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[13]" SITE "F1";
+IOBUF PORT "lcd_data[13]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[12]" SITE "F2";
+IOBUF PORT "lcd_data[12]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[11]" SITE "E1";
+IOBUF PORT "lcd_data[11]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[10]" SITE "L2";
+IOBUF PORT "lcd_data[10]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[9]" SITE "K1";
+IOBUF PORT "lcd_data[9]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[8]" SITE "K2";
+IOBUF PORT "lcd_data[8]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[7]" SITE "J1";
+IOBUF PORT "lcd_data[7]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[6]" SITE "J2";
+IOBUF PORT "lcd_data[6]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[5]" SITE "H2";
+IOBUF PORT "lcd_data[5]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[4]" SITE "P2";
+IOBUF PORT "lcd_data[4]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[3]" SITE "N1";
+IOBUF PORT "lcd_data[3]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[2]" SITE "M1";
+IOBUF PORT "lcd_data[2]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[1]" SITE "M2";
+IOBUF PORT "lcd_data[1]" IO_TYPE=LVCMOS33;
+LOCATE COMP "lcd_data[0]" SITE "L1";
+IOBUF PORT "lcd_data[0]" IO_TYPE=LVCMOS33;
+
+## QSPI PSRAM (APS6404L, EasyFlash cart image);
+## data pads pulled UP so they float during turnaround (psram bring-up
+## lesson: a silent chip reads F, not 0).
+LOCATE COMP "psram_ce_n" SITE "B4";
+IOBUF PORT "psram_ce_n" IO_TYPE=LVCMOS33 DRIVE=4 SLEWRATE=SLOW;
+LOCATE COMP "psram_sclk" SITE "B6";
+IOBUF PORT "psram_sclk" IO_TYPE=LVCMOS33 DRIVE=4 SLEWRATE=SLOW;
+LOCATE COMP "psram_sio0" SITE "A6";
+IOBUF PORT "psram_sio0" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 SLEWRATE=SLOW;
+LOCATE COMP "psram_sio1" SITE "B5";
+IOBUF PORT "psram_sio1" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 SLEWRATE=SLOW;
+LOCATE COMP "psram_sio2" SITE "A5";
+IOBUF PORT "psram_sio2" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 SLEWRATE=SLOW;
+LOCATE COMP "psram_sio3" SITE "A4";
+IOBUF PORT "psram_sio3" IO_TYPE=LVCMOS33 PULLMODE=UP DRIVE=4 SLEWRATE=SLOW;

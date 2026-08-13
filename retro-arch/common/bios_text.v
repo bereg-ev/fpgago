@@ -1,0 +1,297 @@
+//
+// bios_text.v — BIOS-mode 80x25 text renderer (MCU-driven "Award BIOS" screen)
+//
+// A self-timed 800x480 LCD source: 80x25 characters filling the whole panel
+// in 10x19-px cells.  Horizontal is the authentic VGA 9-dot rendering (the
+// 720x400 text mode every real BIOS used): 9 native font pixels — NO
+// Bresenham column doubling — plus a 10th column that repeats column 8 for
+// every non-ASCII glyph (box drawing, blocks, the logo) so line graphics
+// stay seamless across cells, while letters get a clean spacing column.
+// Vertical: each 16-line glyph shows over 19 scanlines (font rows 2, 7, 12
+// shown twice); 25x19 = 475 with 2 blank lines top + 3 bottom.
+// The MCU paints the screen over the QSPI link (qspi_slave.v TEXT_WRITE /
+// TEXT_FILL commands drive the wr_* port); this module never needs a CPU.
+//
+// Cell format (16 bit): [7:0] = CP437 char code, [15:8] = VGA attribute
+//   attr[3:0] fg color, attr[6:4] bg color, attr[7] blink (classic EGA/VGA).
+//
+// Timing: HTOTAL is per-machine (912 = c16/plus4 TED sub-line, 1008 = c64
+// VIC sub-line) so the panel sees the same ~31 kHz line rate it already
+// locks to in machine mode; VTOTAL 624 gives ~50 Hz on both clocks.
+//
+// BRAM shapes (the v2 silicon rules):
+//   text RAM  = two 1024x16 banks, separate write/read always blocks with a
+//               registered bank mux — exactly the proven lbram line-buffer
+//               shape (never a deep true-dual-port geometry).
+//   font ROM  = 4096x9 as two 2048x9 banks (DP16KD 2Kx9 mode) with the same
+//               registered bank mux; $readmemh per bank and NO for-loop
+//               init before it — the yosys readmemh-drop trap.
+//
+// Cost: 2 EBR text + 2 EBR font = 4 EBR total (unchanged from the 8-bit font).
+//
+module bios_text #(
+    parameter HTOTAL = 912,     // 912 = c16/plus4 (28.375 MHz), 1008 = c64 (31.53 MHz)
+    parameter VTOTAL = 624      // 624 = retro ~50 Hz; 525 = the lcd_out 1056x525 timing
+)(
+    input  clk,
+    input  rst,                 // active-low async, same idiom as the retro SoCs
+    // text RAM write port (from qspi_slave)
+    input  [10:0] wr_addr,      // cell index 0..1999 (row*80+col)
+    input  [15:0] wr_data,      // {attr, char}
+    input         wr_en,
+
+    output        lcd_hsync,
+    output        lcd_vsync,
+    output        lcd_de,
+    output reg [15:0] lcd_data
+);
+    localparam HACTIVE = 800;
+    localparam HFP     = 16;
+    localparam HPW     = 48;
+    localparam VACTIVE = 480;
+    localparam VFP     = 13;
+    localparam VPW     = 3;
+    localparam YSTART  = 2;     // text lines 2..476 (25 rows x 19 lines)
+    localparam CELL_W  = 10;    // glyph width on screen (8 source px)
+    localparam ROW_H   = 19;    // glyph height on screen (16 source lines)
+
+    // ── raster counters ────────────────────────────────────────────────────
+    reg [10:0] hcnt = 0;
+    reg [9:0]  vcnt = 0;
+    reg [5:0]  fcnt = 0;        // frame counter (blink)
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            hcnt <= 0; vcnt <= 0; fcnt <= 0;
+        end else begin
+            if (hcnt == HTOTAL - 1) begin
+                hcnt <= 0;
+                if (vcnt == VTOTAL - 1) begin
+                    vcnt <= 0;
+                    fcnt <= fcnt + 1'b1;
+                end else
+                    vcnt <= vcnt + 1'b1;
+            end else
+                hcnt <= hcnt + 1'b1;
+        end
+
+    wire blink_hide = fcnt[4];  // ~1.6 Hz at 50 Hz frame rate
+
+    // ── text RAM: two 1024x16 banks (proven lbram SDP shape) ───────────────
+    reg [15:0] tram0 [0:1023];
+    reg [15:0] tram1 [0:1023];
+
+    always @(posedge clk)
+        if (wr_en && !wr_addr[10]) tram0[wr_addr[9:0]] <= wr_data;
+    always @(posedge clk)
+        if (wr_en &&  wr_addr[10]) tram1[wr_addr[9:0]] <= wr_data;
+
+    reg [10:0] traddr;
+    reg [15:0] tq0, tq1;
+    reg        trsel_q;
+    always @(posedge clk) begin
+        tq0     <= tram0[traddr[9:0]];
+        tq1     <= tram1[traddr[9:0]];
+        trsel_q <= traddr[10];
+    end
+    wire [15:0] text_q = trsel_q ? tq1 : tq0;
+
+    // ── font ROM: 4096x9 as two 2048x9 banks, registered bank mux ──────────
+    reg [8:0] font_lo [0:2047];         // chars 0x00-0x7F
+    reg [8:0] font_hi [0:2047];         // chars 0x80-0xFF
+    // NB: yosys executes $readmemh at parse time and string PARAMETERS are
+    // not re-applied, so the path must resolve from the build cwd — selected
+    // by define instead:
+    //   default ("../roms/..."): retro synth (cwd retro-arch/<a>, via the
+    //     ../roms -> <a>/roms symlink) and ALL sim-desktop builds (cwd
+    //     <arch>/sim-desktop; the console arches have <a>/roms ->
+    //     ../../util/roms symlinks — arch/ itself holds only architectures).
+    //   BIOS_FONT_LOCAL ("roms/..."): console synth (cwd arch/<a>, resolves
+    //     through the same <a>/roms symlink).
+    // All font copies are generated by retro-arch/common/bios_font.py.
+`ifdef BIOS_FONT_LOCAL
+    initial $readmemh("roms/bios_font_lo.hex", font_lo);
+    initial $readmemh("roms/bios_font_hi.hex", font_hi);
+`else
+    initial $readmemh("../roms/bios_font_lo.hex", font_lo);
+    initial $readmemh("../roms/bios_font_hi.hex", font_hi);
+`endif
+
+    reg [8:0] fq_lo, fq_hi;
+    reg       fsel_q;
+
+    // ── vertical stretch: 25 rows x 19 lines, font row via 16→19 LUT ──────
+    // trow/lrow/row_base/line_vis describe the line whose DISPLAY starts at
+    // the next hcnt==0; they advance at HTOTAL-12, BEFORE the first fetch
+    // event of that line (fetch phase 0 fires at HTOTAL-10), so the cell-0
+    // prefetch that crosses the line boundary reads the right row already.
+    reg [10:0] row_base;                  // text row * 80
+    reg [4:0]  lrow;                      // 0..18 line inside the text row
+    reg        line_vis;                  // next display line has text
+
+    wire [9:0] vnext = (vcnt == VTOTAL - 1) ? 10'd0 : vcnt + 10'd1;
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            row_base <= 0; lrow <= 0; line_vis <= 0;
+        end else if (hcnt == HTOTAL - 12) begin
+            line_vis <= (vnext >= YSTART) && (vnext < YSTART + 25 * ROW_H);
+            if (vnext <= YSTART) begin
+                lrow     <= 0;
+                row_base <= 0;
+            end else if (vnext < YSTART + 25 * ROW_H) begin
+                if (lrow == ROW_H - 1) begin
+                    lrow     <= 0;
+                    row_base <= row_base + 11'd80;
+                end else
+                    lrow <= lrow + 1'b1;
+            end
+        end
+
+    // 19-line → 16-row Bresenham map (font rows 2, 7, 12 duplicated)
+    reg [3:0] yrow;
+    always @* begin
+        case (lrow)
+            5'd0:  yrow = 4'd0;
+            5'd1:  yrow = 4'd1;
+            5'd2:  yrow = 4'd2;
+            5'd3:  yrow = 4'd2;
+            5'd4:  yrow = 4'd3;
+            5'd5:  yrow = 4'd4;
+            5'd6:  yrow = 4'd5;
+            5'd7:  yrow = 4'd6;
+            5'd8:  yrow = 4'd7;
+            5'd9:  yrow = 4'd7;
+            5'd10: yrow = 4'd8;
+            5'd11: yrow = 4'd9;
+            5'd12: yrow = 4'd10;
+            5'd13: yrow = 4'd11;
+            5'd14: yrow = 4'd12;
+            5'd15: yrow = 4'd12;
+            5'd16: yrow = 4'd13;
+            5'd17: yrow = 4'd14;
+            5'd18: yrow = 4'd15;
+            default: yrow = 4'd0;
+        endcase
+    end
+
+    // ── fetch pipeline, one cell (10 px) ahead of display ─────────────────
+    // fp/fcell resync at HTOTAL-11 so fetch phase 0 of cell 0 lands on
+    // HTOTAL-10: the whole 10-phase fetch of cell 0 runs during the previous
+    // line's blanking and the shifter load (fp==9) lands on HTOTAL-1, one
+    // clock before the cell is displayed at hcnt 0..9.  During the display
+    // of any cell the fetch counter is at the SAME phase for the next cell,
+    // so fp doubles as the display phase.  Phases:
+    //   fp0: text RAM address set        (text_q valid during fp2)
+    //   fp4: latch the cell              (char -> font address, valid fp5)
+    //   fp6: font row registered in the bank regs (stable through fp9)
+    //   fp9: load the pixel shifter + attribute for the next cell
+    // No hold phases: all 9 font pixels + the extension pixel shift out 1:1.
+    reg [3:0] fp;                         // fetch/display phase 0..9
+    reg [6:0] fcell;                      // cell being fetched (0..79, then junk)
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            fp <= 0; fcell <= 0;
+        end else if (hcnt == HTOTAL - 11) begin
+            fp    <= 0;
+            fcell <= 0;
+        end else if (fp == CELL_W - 1) begin
+            fp    <= 0;
+            fcell <= fcell + 1'b1;
+        end else
+            fp <= fp + 1'b1;
+
+    wire fetch_ok = (fcell < 7'd80) && line_vis;
+
+    reg [15:0] cell_q;
+    reg        fetch_ok_q;                // fetch_ok pipelined to the fp9 load
+    reg [9:0]  shifter;
+    reg [7:0]  attr_cur;
+
+    // font read every cycle: separate reset-free block, registered outputs
+    // + registered bank select (the proven lbram/text-RAM read shape)
+    wire [11:0] faddr = {cell_q[7:0], yrow};
+    always @(posedge clk) begin
+        fq_lo  <= font_lo[faddr[10:0]];
+        fq_hi  <= font_hi[faddr[10:0]];
+        fsel_q <= faddr[11];
+    end
+    wire [8:0] font_q = fsel_q ? fq_hi : fq_lo;
+
+    // 10th-column extension: every non-ASCII glyph (box drawing, blocks,
+    // shades, the logo) repeats font column 8 into the spacing column so
+    // cell-crossing graphics stay continuous; ASCII (0x20-0x7F) gets a
+    // clean background spacing column (the VGA 9-dot line-graphics rule,
+    // widened to the whole non-ASCII range).
+    wire glyph_ext = cell_q[7] | (~cell_q[6] & ~cell_q[5]);
+
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            traddr <= 0; cell_q <= 0; fetch_ok_q <= 0;
+            shifter <= 0; attr_cur <= 0;
+        end else begin
+            if (fp == 4'd0) begin
+                traddr     <= row_base + fcell;
+                fetch_ok_q <= fetch_ok;
+            end
+            if (fp == 4'd4)
+                cell_q <= text_q;
+            if (fp == 4'd9) begin
+                shifter  <= fetch_ok_q ? {font_q, font_q[0] & glyph_ext}
+                                       : 10'b0;
+                attr_cur <= fetch_ok_q ? cell_q[15:8] : 8'h00;
+            end else
+                shifter <= {shifter[8:0], 1'b0};
+        end
+
+    // ── VGA 16-color palette → RGB565 ──────────────────────────────────────
+    function [15:0] vga565;
+        input [3:0] c;
+        case (c)
+            4'h0: vga565 = 16'h0000;  // black
+            4'h1: vga565 = 16'h0015;  // blue
+            4'h2: vga565 = 16'h0540;  // green
+            4'h3: vga565 = 16'h0555;  // cyan
+            4'h4: vga565 = 16'hA800;  // red
+            4'h5: vga565 = 16'hA815;  // magenta
+            4'h6: vga565 = 16'hAAA0;  // brown
+            4'h7: vga565 = 16'hAD55;  // light grey
+            4'h8: vga565 = 16'h52AA;  // dark grey
+            4'h9: vga565 = 16'h52BF;  // bright blue
+            4'hA: vga565 = 16'h57EA;  // bright green
+            4'hB: vga565 = 16'h57FF;  // bright cyan
+            4'hC: vga565 = 16'hFAAA;  // bright red
+            4'hD: vga565 = 16'hFABF;  // bright magenta
+            4'hE: vga565 = 16'hFFEA;  // yellow
+            4'hF: vga565 = 16'hFFFF;  // white
+        endcase
+    endfunction
+
+    // ── output stage (everything registered with the same 1-clk delay) ─────
+    // The 5 blank lines (0,1 top / 477..479 bottom) need no window test:
+    // fetch_ok is low there, so the shifter and attribute load as 0 = black.
+    wire de_now  = (hcnt < HACTIVE) && (vcnt < VACTIVE);
+    wire px_on   = shifter[9] && !(attr_cur[7] && blink_hide);
+
+    reg hs_r, vs_r, de_r;
+    always @(posedge clk or negedge rst)
+        if (!rst) begin
+            hs_r <= 1; vs_r <= 1; de_r <= 0; lcd_data <= 0;
+        end else begin
+            de_r <= de_now;
+            hs_r <= !((hcnt >= HACTIVE + HFP) &&
+                      (hcnt <  HACTIVE + HFP + HPW));
+            vs_r <= !((vcnt >= VACTIVE + VFP) &&
+                      (vcnt <  VACTIVE + VFP + VPW));
+            lcd_data <= de_now
+                        ? (px_on ? vga565(attr_cur[3:0])
+                                 : vga565({1'b0, attr_cur[6:4]}))
+                        : 16'h0000;
+        end
+
+    assign lcd_hsync = hs_r;
+    assign lcd_vsync = vs_r;
+    assign lcd_de    = de_r;
+
+endmodule
